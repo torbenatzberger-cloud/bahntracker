@@ -1,9 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from 'db-vendo-client';
-import { profile as dbnavProfile } from 'db-vendo-client/p/dbnav/index.js';
 
-// db-vendo-client Instanz
-const client = createClient(dbnavProfile, 'BahnTracker/1.0');
+// Wir verwenden v6.db.transport.rest als Proxy (db-vendo-client ist ESM-only und funktioniert nicht in Vercel)
+const API_BASE = 'https://v6.db.transport.rest';
 
 // In-Memory Cache
 interface CacheEntry {
@@ -12,7 +10,7 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 Minuten (länger wegen Rate Limits)
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 Minuten
 const MAX_CACHE_SIZE = 100;
 
 function getCacheKey(type: string, id: string): string {
@@ -48,22 +46,28 @@ function setCache(key: string, data: any): void {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-// Retry-Wrapper für db-vendo-client Aufrufe
-async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
+// Aggressives Retry mit exponential backoff
+async function fetchWithRetry(url: string, retries = 5, delay = 2000): Promise<Response> {
   for (let i = 0; i < retries; i++) {
     try {
-      return await fn();
-    } catch (e: any) {
-      const isRateLimit = e?.message?.includes('429') || e?.message?.includes('rate');
-      const isServerError = e?.message?.includes('503') || e?.message?.includes('500');
+      const response = await fetch(url);
 
-      if ((isRateLimit || isServerError) && i < retries - 1) {
-        const waitTime = delay * Math.pow(2, i);
-        console.log(`API error, retry ${i + 1}/${retries} in ${waitTime}ms...`);
+      if (response.ok) return response;
+
+      // Bei 503/500/429 warten und erneut versuchen
+      if ((response.status === 503 || response.status === 500 || response.status === 429) && i < retries - 1) {
+        const waitTime = delay * Math.pow(2, i); // 2s, 4s, 8s, 16s, 32s
+        console.log(`API returned ${response.status}, retry ${i + 1}/${retries - 1} in ${waitTime}ms`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
-      throw e;
+
+      return response;
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      const waitTime = delay * Math.pow(2, i);
+      console.log(`Fetch error, retry ${i + 1}/${retries - 1} in ${waitTime}ms`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
   throw new Error('Max retries reached');
@@ -96,46 +100,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json(cached);
       }
 
-      const departures = await withRetry(() =>
-        client.departures(stationId, {
-          duration: 120,
-          results: 30,
-          products: {
-            nationalExpress: true,
-            national: true,
-            regionalExpress: true,
-            regional: true,
-            suburban: false,
-            bus: false,
-            ferry: false,
-            subway: false,
-            tram: false,
-            taxi: false,
-          },
-        })
-      );
+      const url = new URL(`/stops/${stationId}/departures`, API_BASE);
+      url.searchParams.set('duration', '120');
+      url.searchParams.set('results', '30');
+      url.searchParams.set('nationalExpress', 'true');
+      url.searchParams.set('national', 'true');
+      url.searchParams.set('regionalExpress', 'true');
+      url.searchParams.set('regional', 'true');
+      url.searchParams.set('suburban', 'false');
+      url.searchParams.set('bus', 'false');
+      url.searchParams.set('ferry', 'false');
+      url.searchParams.set('subway', 'false');
+      url.searchParams.set('tram', 'false');
+      url.searchParams.set('taxi', 'false');
 
-      // Formatiere für Kompatibilität mit bestehendem Code
-      const result = {
-        departures: departures.map((dep: any) => ({
-          tripId: dep.tripId,
-          stop: dep.stop,
-          when: dep.when,
-          plannedWhen: dep.plannedWhen,
-          delay: dep.delay,
-          platform: dep.platform,
-          plannedPlatform: dep.plannedPlatform,
-          direction: dep.direction,
-          line: {
-            type: 'line',
-            id: dep.line?.id,
-            fahrtNr: dep.line?.fahrtNr,
-            name: dep.line?.name,
-            product: dep.line?.product,
-            productName: dep.line?.productName,
-          },
-        })),
-      };
+      const response = await fetchWithRetry(url.toString());
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          error: `Upstream API error: ${response.status}`,
+          message: 'Die Bahn-API ist momentan nicht erreichbar. Bitte später erneut versuchen.',
+        });
+      }
+
+      const data = await response.json();
+      const result = { departures: data.departures || data };
 
       setCache(cacheKey, result);
       res.setHeader('X-Cache', 'MISS');
@@ -152,28 +141,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json(cached);
       }
 
-      const trip = await withRetry(() =>
-        client.trip(tripId, { stopovers: true })
-      );
+      const url = new URL(`/trips/${encodeURIComponent(tripId)}`, API_BASE);
+      url.searchParams.set('stopovers', 'true');
 
-      const result = {
-        trip: {
-          id: trip.id,
-          line: trip.line,
-          direction: trip.direction,
-          stopovers: trip.stopovers?.map((s: any) => ({
-            stop: s.stop,
-            arrival: s.arrival,
-            plannedArrival: s.plannedArrival,
-            departure: s.departure,
-            plannedDeparture: s.plannedDeparture,
-            arrivalDelay: s.arrivalDelay,
-            departureDelay: s.departureDelay,
-            platform: s.platform,
-            plannedPlatform: s.plannedPlatform,
-          })),
-        },
-      };
+      const response = await fetchWithRetry(url.toString());
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          error: `Upstream API error: ${response.status}`,
+          message: 'Die Bahn-API ist momentan nicht erreichbar.',
+        });
+      }
+
+      const data = await response.json();
+      const result = { trip: data.trip || data };
 
       setCache(cacheKey, result);
       res.setHeader('X-Cache', 'MISS');
