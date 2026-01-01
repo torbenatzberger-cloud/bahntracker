@@ -20,6 +20,7 @@ export default function HomeScreen({ navigation }: any) {
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<TrainJourney[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Cleanup timer on unmount
@@ -49,6 +50,7 @@ export default function HomeScreen({ navigation }: any) {
 
     // Show loading indicator
     setLoading(true);
+    setError(null);
 
     // Debounce: Wait 400ms after last keystroke
     debounceTimer.current = setTimeout(async () => {
@@ -56,9 +58,18 @@ export default function HomeScreen({ navigation }: any) {
         const results = await searchTrainByNumber(text);
         setSuggestions(results.slice(0, 10)); // Limit to 10 results
         setShowSuggestions(results.length > 0);
-      } catch {
+        setError(null);
+      } catch (e: any) {
         setSuggestions([]);
         setShowSuggestions(false);
+        // Check for API errors
+        if (e?.message?.includes('503') || e?.message?.includes('Service')) {
+          setError('Die Bahn-API ist momentan nicht erreichbar. Bitte versuche es später erneut.');
+        } else if (e?.message?.includes('500')) {
+          setError('Server-Fehler. Bitte versuche es später erneut.');
+        } else {
+          setError('Verbindungsfehler. Prüfe deine Internetverbindung.');
+        }
       } finally {
         setLoading(false);
       }
@@ -144,8 +155,15 @@ export default function HomeScreen({ navigation }: any) {
             </View>
           )}
 
+          {/* Error message */}
+          {error && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
           {/* No results message */}
-          {!loading && trainNumber.length >= 2 && suggestions.length === 0 && showSuggestions === false && (
+          {!loading && !error && trainNumber.length >= 2 && suggestions.length === 0 && (
             <View style={styles.noResultsContainer}>
               <Text style={styles.noResultsText}>
                 Kein Zug gefunden für "{trainNumber}"
@@ -332,6 +350,20 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     fontSize: 14,
     textAlign: 'center',
+  },
+  errorContainer: {
+    marginTop: spacing.md,
+    padding: spacing.lg,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  errorText: {
+    color: colors.accent.red,
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   tipsSection: {
     paddingHorizontal: spacing.xl,

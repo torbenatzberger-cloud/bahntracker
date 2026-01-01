@@ -2,7 +2,6 @@ import { TrainJourney, TrainStop } from '../types';
 import { Platform } from 'react-native';
 
 function isWebEnvironment(): boolean {
-  // Check if running in browser (web)
   if (Platform.OS === 'web') return true;
   if (typeof window !== 'undefined' && typeof document !== 'undefined') return true;
   return false;
@@ -12,7 +11,6 @@ function buildUrl(endpoint: string, params: Record<string, string> = {}): string
   const isWeb = isWebEnvironment();
 
   if (isWeb && typeof window !== 'undefined') {
-    // Für Web: nutze Proxy
     const url = new URL('/api/transport', window.location.origin);
     url.searchParams.set('endpoint', endpoint);
     Object.entries(params).forEach(([key, value]) => {
@@ -20,13 +18,34 @@ function buildUrl(endpoint: string, params: Record<string, string> = {}): string
     });
     return url.toString();
   } else {
-    // Für native Apps: direkte API
     const url = new URL(endpoint, 'https://v6.db.transport.rest');
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.set(key, value);
     });
     return url.toString();
   }
+}
+
+// Retry-Mechanismus mit exponential backoff
+async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<Response> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return response;
+
+      // Bei 503 (Service Unavailable) warten und erneut versuchen
+      if (response.status === 503 && i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+        continue;
+      }
+
+      throw new Error(`API error: ${response.status}`);
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+    }
+  }
+  throw new Error('Max retries reached');
 }
 
 export async function getDepartures(stationId: string): Promise<any[]> {
@@ -45,8 +64,7 @@ export async function getDepartures(stationId: string): Promise<any[]> {
     taxi: 'false',
   });
 
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`API error: ${response.status}`);
+  const response = await fetchWithRetry(url, 2, 500);
   const data = await response.json();
   return data.departures || data;
 }
@@ -56,10 +74,13 @@ export async function getTripDetails(tripId: string): Promise<any> {
     stopovers: 'true',
   });
 
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  const data = await response.json();
-  return data.trip || data;
+  try {
+    const response = await fetchWithRetry(url, 2, 500);
+    const data = await response.json();
+    return data.trip || data;
+  } catch {
+    return null;
+  }
 }
 
 export async function searchTrainByNumber(trainNumber: string): Promise<TrainJourney[]> {
