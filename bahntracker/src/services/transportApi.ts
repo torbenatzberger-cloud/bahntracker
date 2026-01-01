@@ -84,8 +84,8 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
 
 export async function getDepartures(stationId: string): Promise<any[]> {
   const url = buildUrl(`/stops/${stationId}/departures`, {
-    duration: '120',
-    results: '30', // Reduziert von 50 auf 30
+    duration: '240', // 4 Stunden für mehr Ergebnisse
+    results: '50',   // Mehr Ergebnisse pro Station
     nationalExpress: 'true',
     national: 'true',
     regionalExpress: 'true',
@@ -128,9 +128,21 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
     return cached;
   }
 
-  // Nur 3 große Stationen abfragen (statt 5) - reduziert API-Calls
-  // Frankfurt, München, Berlin sind die wichtigsten Knoten
-  const majorStations = ['8000105', '8000261', '8011160'];
+  // Extrahiere Zugnummer für flexibles Matching
+  const searchNum = cleanedNumber.replace(/\D/g, ''); // Nur Ziffern: "579"
+  const searchFull = cleanedNumber.replace(/\s/g, ''); // Ohne Leerzeichen: "ICE579"
+
+  // 7 große Knotenbahnhöfe für bessere Abdeckung
+  const majorStations = [
+    '8000105', // Frankfurt Hbf
+    '8000261', // München Hbf
+    '8011160', // Berlin Hbf
+    '8000207', // Köln Hbf
+    '8002549', // Hamburg Hbf
+    '8000096', // Stuttgart Hbf
+    '8000152', // Hannover Hbf
+  ];
+
   const matchingDepartures: { tripId: string; dep: any }[] = [];
   const seenTripIds = new Set<string>();
 
@@ -139,23 +151,30 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
     try {
       const departures = await getDepartures(stationId);
       departures.forEach((dep: any) => {
-        const lineName = dep.line?.name?.toUpperCase() || '';
-        const fahrtNr = dep.line?.fahrtNr || '';
-        const matches = lineName.includes(cleanedNumber) ||
-          fahrtNr === cleanedNumber.replace(/\D/g, '') ||
-          lineName.replace(/\s/g, '') === cleanedNumber.replace(/\s/g, '');
+        const lineName = (dep.line?.name || '').toUpperCase();
+        const fahrtNr = String(dep.line?.fahrtNr || '');
+        const lineNameNoSpace = lineName.replace(/\s/g, '');
 
-        if (matches && !seenTripIds.has(dep.tripId)) {
+        // Flexibles Matching:
+        // 1. Exakte Zugnummer: fahrtNr === "579"
+        // 2. Zugnummer in Name: "ICE 579" enthält "579"
+        // 3. Vollständiger Name: "ICE579" enthält "ICE579"
+        const matches =
+          (searchNum && fahrtNr === searchNum) ||
+          (searchNum && lineName.includes(searchNum)) ||
+          (searchFull && lineNameNoSpace.includes(searchFull));
+
+        if (matches && dep.tripId && !seenTripIds.has(dep.tripId)) {
           seenTripIds.add(dep.tripId);
           matchingDepartures.push({ tripId: dep.tripId, dep });
         }
       });
 
       // Wenn wir genug Ergebnisse haben, brechen wir ab
-      if (matchingDepartures.length >= 3) break;
+      if (matchingDepartures.length >= 5) break;
 
       // Kleine Pause zwischen Anfragen
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 50));
     } catch (e) {
       console.warn(`Station ${stationId} failed:`, e);
       // Bei Fehler weitermachen mit nächster Station
@@ -163,7 +182,7 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   }
 
   // Limitiere und hole Trip-Details sequentiell
-  const limitedDepartures = matchingDepartures.slice(0, 5);
+  const limitedDepartures = matchingDepartures.slice(0, 8);
   const results: TrainJourney[] = [];
 
   for (const { tripId } of limitedDepartures) {
@@ -175,10 +194,10 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
       }
 
       // Stoppe wenn wir genug haben
-      if (results.length >= 3) break;
+      if (results.length >= 5) break;
 
       // Kleine Pause zwischen Anfragen
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 30));
     } catch (e) {
       console.warn(`Trip ${tripId} failed:`, e);
     }
