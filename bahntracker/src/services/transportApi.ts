@@ -26,6 +26,38 @@ function buildUrl(endpoint: string, params: Record<string, string> = {}): string
   }
 }
 
+// Client-Side Cache für Search-Ergebnisse
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const searchCache = new Map<string, CacheEntry<TrainJourney[]>>();
+const SEARCH_CACHE_TTL = 3 * 60 * 1000; // 3 Minuten
+
+function getCachedSearch(key: string): TrainJourney[] | null {
+  const entry = searchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > SEARCH_CACHE_TTL) {
+    searchCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedSearch(key: string, data: TrainJourney[]): void {
+  // Alte Einträge aufräumen
+  if (searchCache.size > 20) {
+    const now = Date.now();
+    for (const [k, v] of searchCache.entries()) {
+      if (now - v.timestamp > SEARCH_CACHE_TTL) {
+        searchCache.delete(k);
+      }
+    }
+  }
+  searchCache.set(key, { data, timestamp: Date.now() });
+}
+
 // Retry-Mechanismus mit exponential backoff
 async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<Response> {
   for (let i = 0; i < retries; i++) {
@@ -53,7 +85,7 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
 export async function getDepartures(stationId: string): Promise<any[]> {
   const url = buildUrl(`/stops/${stationId}/departures`, {
     duration: '120',
-    results: '50',
+    results: '30', // Reduziert von 50 auf 30
     nationalExpress: 'true',
     national: 'true',
     regionalExpress: 'true',
@@ -89,18 +121,22 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   const cleanedNumber = trainNumber.trim().toUpperCase();
   if (!cleanedNumber) return [];
 
-  const majorStations = ['8000105', '8000261', '8011160', '8000207', '8000152'];
+  // Client-Cache prüfen
+  const cached = getCachedSearch(cleanedNumber);
+  if (cached) {
+    console.log('Using cached search results for:', cleanedNumber);
+    return cached;
+  }
+
+  // Nur 3 große Stationen abfragen (statt 5) - reduziert API-Calls
+  // Frankfurt, München, Berlin sind die wichtigsten Knoten
+  const majorStations = ['8000105', '8000261', '8011160'];
   const matchingDepartures: { tripId: string; dep: any }[] = [];
   const seenTripIds = new Set<string>();
 
   // Sequentielle Anfragen um Rate Limiting zu vermeiden
   for (const stationId of majorStations) {
     try {
-      // Kleine Pause zwischen Stationsanfragen
-      if (matchingDepartures.length > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
       const departures = await getDepartures(stationId);
       departures.forEach((dep: any) => {
         const lineName = dep.line?.name?.toUpperCase() || '';
@@ -116,36 +152,41 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
       });
 
       // Wenn wir genug Ergebnisse haben, brechen wir ab
-      if (matchingDepartures.length >= 5) break;
+      if (matchingDepartures.length >= 3) break;
+
+      // Kleine Pause zwischen Anfragen
+      await new Promise(resolve => setTimeout(resolve, 100));
     } catch (e) {
       console.warn(`Station ${stationId} failed:`, e);
-      // Längere Pause bei Fehler
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Bei Fehler weitermachen mit nächster Station
     }
   }
 
   // Limitiere und hole Trip-Details sequentiell
-  const limitedDepartures = matchingDepartures.slice(0, 10);
+  const limitedDepartures = matchingDepartures.slice(0, 5);
   const results: TrainJourney[] = [];
 
   for (const { tripId } of limitedDepartures) {
     try {
-      // Kleine Pause zwischen Trip-Details-Anfragen
-      if (results.length > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
       const tripDetails = await getTripDetails(tripId);
       if (tripDetails?.stopovers) {
         const journey = convertToTrainJourney(tripDetails);
         if (journey) results.push(journey);
       }
+
+      // Stoppe wenn wir genug haben
+      if (results.length >= 3) break;
+
+      // Kleine Pause zwischen Anfragen
+      await new Promise(resolve => setTimeout(resolve, 50));
     } catch (e) {
       console.warn(`Trip ${tripId} failed:`, e);
     }
+  }
 
-    // Stoppe wenn wir genug haben
-    if (results.length >= 5) break;
+  // Ergebnisse cachen
+  if (results.length > 0) {
+    setCachedSearch(cleanedNumber, results);
   }
 
   return results;
