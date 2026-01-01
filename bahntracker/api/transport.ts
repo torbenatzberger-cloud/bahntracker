@@ -1,33 +1,29 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createClient } from 'db-vendo-client';
+import { profile as dbnavProfile } from 'db-vendo-client/p/dbnav/index.js';
 
-const API_BASE = 'https://v6.db.transport.rest';
+// db-vendo-client Instanz
+const client = createClient(dbnavProfile, 'BahnTracker/1.0');
 
-// In-Memory Cache für Vercel Serverless Functions
-// Cache wird zwischen Requests im selben Container geteilt
+// In-Memory Cache
 interface CacheEntry {
   data: any;
   timestamp: number;
 }
 
 const cache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 Minuten
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 Minuten (länger wegen Rate Limits)
 const MAX_CACHE_SIZE = 100;
 
-function getCacheKey(endpoint: string, params: Record<string, string>): string {
-  const sortedParams = Object.entries(params)
-    .filter(([key]) => key !== 'endpoint')
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}=${v}`)
-    .join('&');
-  return `${endpoint}?${sortedParams}`;
+function getCacheKey(type: string, id: string): string {
+  return `${type}:${id}`;
 }
 
 function getFromCache(key: string): any | null {
   const entry = cache.get(key);
   if (!entry) return null;
 
-  const now = Date.now();
-  if (now - entry.timestamp > CACHE_TTL_MS) {
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
     cache.delete(key);
     return null;
   }
@@ -36,7 +32,6 @@ function getFromCache(key: string): any | null {
 }
 
 function setCache(key: string, data: any): void {
-  // Alte Einträge löschen wenn Cache zu groß
   if (cache.size >= MAX_CACHE_SIZE) {
     const now = Date.now();
     for (const [k, v] of cache.entries()) {
@@ -44,7 +39,6 @@ function setCache(key: string, data: any): void {
         cache.delete(k);
       }
     }
-    // Falls immer noch zu voll, ältesten löschen
     if (cache.size >= MAX_CACHE_SIZE) {
       const firstKey = cache.keys().next().value;
       if (firstKey) cache.delete(firstKey);
@@ -54,28 +48,22 @@ function setCache(key: string, data: any): void {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-// Retry mit exponential backoff - aggressiver bei 503
-async function fetchWithRetry(url: string, retries = 5, delay = 1500): Promise<Response> {
+// Retry-Wrapper für db-vendo-client Aufrufe
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await fetch(url);
+      return await fn();
+    } catch (e: any) {
+      const isRateLimit = e?.message?.includes('429') || e?.message?.includes('rate');
+      const isServerError = e?.message?.includes('503') || e?.message?.includes('500');
 
-      if (response.ok) return response;
-
-      // Bei 503/500/429 warten und erneut versuchen
-      if ((response.status === 503 || response.status === 500 || response.status === 429) && i < retries - 1) {
-        const waitTime = delay * Math.pow(1.5, i); // Exponential: 1500, 2250, 3375, 5062ms
-        console.log(`API returned ${response.status}, retry ${i + 1}/${retries - 1} in ${waitTime}ms`);
+      if ((isRateLimit || isServerError) && i < retries - 1) {
+        const waitTime = delay * Math.pow(2, i);
+        console.log(`API error, retry ${i + 1}/${retries} in ${waitTime}ms...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
-
-      return response; // Fehler-Response zurückgeben
-    } catch (e) {
-      if (i === retries - 1) throw e;
-      const waitTime = delay * Math.pow(1.5, i);
-      console.log(`Fetch error, retry ${i + 1}/${retries - 1} in ${waitTime}ms`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+      throw e;
     }
   }
   throw new Error('Max retries reached');
@@ -91,58 +79,113 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
-  const { endpoint } = req.query;
+  const { action, stationId, tripId } = req.query;
 
-  if (!endpoint || typeof endpoint !== 'string') {
-    return res.status(400).json({ error: 'Missing endpoint parameter' });
-  }
-
-  // Query-Parameter sammeln
-  const params: Record<string, string> = {};
-  Object.entries(req.query).forEach(([key, value]) => {
-    if (key !== 'endpoint' && typeof value === 'string') {
-      params[key] = value;
-    }
-  });
-
-  // Cache prüfen
-  const cacheKey = getCacheKey(endpoint, params);
-  const cachedData = getFromCache(cacheKey);
-
-  if (cachedData) {
-    res.setHeader('X-Cache', 'HIT');
-    return res.status(200).json(cachedData);
+  if (!action || typeof action !== 'string') {
+    return res.status(400).json({ error: 'Missing action parameter' });
   }
 
   try {
-    // URL bauen
-    const url = new URL(endpoint, API_BASE);
-    Object.entries(params).forEach(([key, value]) => {
-      url.searchParams.set(key, value);
-    });
+    // DEPARTURES
+    if (action === 'departures' && typeof stationId === 'string') {
+      const cacheKey = getCacheKey('departures', stationId);
+      const cached = getFromCache(cacheKey);
 
-    // Mit Retry fetchen
-    const response = await fetchWithRetry(url.toString(), 3, 1000);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.status(200).json(cached);
+      }
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: `API error: ${response.status}`,
-        url: url.toString()
-      });
+      const departures = await withRetry(() =>
+        client.departures(stationId, {
+          duration: 120,
+          results: 30,
+          products: {
+            nationalExpress: true,
+            national: true,
+            regionalExpress: true,
+            regional: true,
+            suburban: false,
+            bus: false,
+            ferry: false,
+            subway: false,
+            tram: false,
+            taxi: false,
+          },
+        })
+      );
+
+      // Formatiere für Kompatibilität mit bestehendem Code
+      const result = {
+        departures: departures.map((dep: any) => ({
+          tripId: dep.tripId,
+          stop: dep.stop,
+          when: dep.when,
+          plannedWhen: dep.plannedWhen,
+          delay: dep.delay,
+          platform: dep.platform,
+          plannedPlatform: dep.plannedPlatform,
+          direction: dep.direction,
+          line: {
+            type: 'line',
+            id: dep.line?.id,
+            fahrtNr: dep.line?.fahrtNr,
+            name: dep.line?.name,
+            product: dep.line?.product,
+            productName: dep.line?.productName,
+          },
+        })),
+      };
+
+      setCache(cacheKey, result);
+      res.setHeader('X-Cache', 'MISS');
+      return res.status(200).json(result);
     }
 
-    const data = await response.json();
+    // TRIP DETAILS
+    if (action === 'trip' && typeof tripId === 'string') {
+      const cacheKey = getCacheKey('trip', tripId);
+      const cached = getFromCache(cacheKey);
 
-    // In Cache speichern
-    setCache(cacheKey, data);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.status(200).json(cached);
+      }
 
-    res.setHeader('X-Cache', 'MISS');
-    return res.status(200).json(data);
+      const trip = await withRetry(() =>
+        client.trip(tripId, { stopovers: true })
+      );
+
+      const result = {
+        trip: {
+          id: trip.id,
+          line: trip.line,
+          direction: trip.direction,
+          stopovers: trip.stopovers?.map((s: any) => ({
+            stop: s.stop,
+            arrival: s.arrival,
+            plannedArrival: s.plannedArrival,
+            departure: s.departure,
+            plannedDeparture: s.plannedDeparture,
+            arrivalDelay: s.arrivalDelay,
+            departureDelay: s.departureDelay,
+            platform: s.platform,
+            plannedPlatform: s.plannedPlatform,
+          })),
+        },
+      };
+
+      setCache(cacheKey, result);
+      res.setHeader('X-Cache', 'MISS');
+      return res.status(200).json(result);
+    }
+
+    return res.status(400).json({ error: 'Invalid action or missing parameters' });
   } catch (error) {
-    console.error('Proxy error:', error);
+    console.error('API error:', error);
     return res.status(500).json({
-      error: 'Proxy request failed',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      error: 'API request failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 }

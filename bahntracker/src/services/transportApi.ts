@@ -7,23 +7,12 @@ function isWebEnvironment(): boolean {
   return false;
 }
 
-function buildUrl(endpoint: string, params: Record<string, string> = {}): string {
-  const isWeb = isWebEnvironment();
-
-  if (isWeb && typeof window !== 'undefined') {
-    const url = new URL('/api/transport', window.location.origin);
-    url.searchParams.set('endpoint', endpoint);
-    Object.entries(params).forEach(([key, value]) => {
-      url.searchParams.set(key, value);
-    });
-    return url.toString();
-  } else {
-    const url = new URL(endpoint, 'https://v6.db.transport.rest');
-    Object.entries(params).forEach(([key, value]) => {
-      url.searchParams.set(key, value);
-    });
-    return url.toString();
+function getApiBaseUrl(): string {
+  if (isWebEnvironment() && typeof window !== 'undefined') {
+    return `${window.location.origin}/api/transport`;
   }
+  // Für Native Apps: direkt auf Vercel API zeigen
+  return 'https://bahntracker.vercel.app/api/transport';
 }
 
 // Client-Side Cache für Search-Ergebnisse
@@ -33,7 +22,7 @@ interface CacheEntry<T> {
 }
 
 const searchCache = new Map<string, CacheEntry<TrainJourney[]>>();
-const SEARCH_CACHE_TTL = 3 * 60 * 1000; // 3 Minuten
+const SEARCH_CACHE_TTL = 5 * 60 * 1000; // 5 Minuten
 
 function getCachedSearch(key: string): TrainJourney[] | null {
   const entry = searchCache.get(key);
@@ -46,7 +35,6 @@ function getCachedSearch(key: string): TrainJourney[] | null {
 }
 
 function setCachedSearch(key: string, data: TrainJourney[]): void {
-  // Alte Einträge aufräumen
   if (searchCache.size > 20) {
     const now = Date.now();
     for (const [k, v] of searchCache.entries()) {
@@ -58,15 +46,14 @@ function setCachedSearch(key: string, data: TrainJourney[]): void {
   searchCache.set(key, { data, timestamp: Date.now() });
 }
 
-// Retry-Mechanismus mit exponential backoff
+// Retry-Mechanismus
 async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<Response> {
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url);
       if (response.ok) return response;
 
-      // Bei 503 oder 500 (Server-Fehler) warten und erneut versuchen
-      if ((response.status === 503 || response.status === 500) && i < retries - 1) {
+      if ((response.status === 503 || response.status === 500 || response.status === 429) && i < retries - 1) {
         console.log(`API returned ${response.status}, retrying in ${delay * (i + 1)}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
         continue;
@@ -83,36 +70,22 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
 }
 
 export async function getDepartures(stationId: string): Promise<any[]> {
-  const url = buildUrl(`/stops/${stationId}/departures`, {
-    duration: '120', // 2 Stunden - weniger Last auf API
-    results: '30',   // Weniger Ergebnisse - schnellere Response
-    nationalExpress: 'true',
-    national: 'true',
-    regionalExpress: 'true',
-    regional: 'true',
-    suburban: 'false',
-    bus: 'false',
-    ferry: 'false',
-    subway: 'false',
-    tram: 'false',
-    taxi: 'false',
-  });
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}?action=departures&stationId=${encodeURIComponent(stationId)}`;
 
-  // Mehr Retries mit längeren Pausen bei 503
-  const response = await fetchWithRetry(url, 4, 1000);
+  const response = await fetchWithRetry(url, 3, 1000);
   const data = await response.json();
-  return data.departures || data;
+  return data.departures || [];
 }
 
 export async function getTripDetails(tripId: string): Promise<any> {
-  const url = buildUrl(`/trips/${encodeURIComponent(tripId)}`, {
-    stopovers: 'true',
-  });
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}?action=trip&tripId=${encodeURIComponent(tripId)}`;
 
   try {
     const response = await fetchWithRetry(url, 2, 500);
     const data = await response.json();
-    return data.trip || data;
+    return data.trip || null;
   } catch {
     return null;
   }
@@ -133,9 +106,9 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   const searchNum = cleanedNumber.replace(/\D/g, ''); // Nur Ziffern: "579"
   const searchFull = cleanedNumber.replace(/\s/g, ''); // Ohne Leerzeichen: "ICE579"
 
-  // 3 große Knotenbahnhöfe - weniger API-Last, schnellere Suche
+  // 3 große Knotenbahnhöfe
   const majorStations = [
-    '8000105', // Frankfurt Hbf - zentraler Knotenpunkt
+    '8000105', // Frankfurt Hbf
     '8000261', // München Hbf
     '8011160', // Berlin Hbf
   ];
@@ -143,13 +116,12 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   const matchingDepartures: { tripId: string; dep: any }[] = [];
   const seenTripIds = new Set<string>();
 
-  // Sequentielle Anfragen mit Pausen um Rate Limiting zu vermeiden
   for (let i = 0; i < majorStations.length; i++) {
     const stationId = majorStations[i];
     try {
-      // Pause vor jeder Anfrage (außer der ersten) - länger für API-Stabilität
+      // Pause zwischen Anfragen
       if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
       const departures = await getDepartures(stationId);
@@ -158,10 +130,7 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
         const fahrtNr = String(dep.line?.fahrtNr || '');
         const lineNameNoSpace = lineName.replace(/\s/g, '');
 
-        // Flexibles Matching:
-        // 1. Exakte Zugnummer: fahrtNr === "579"
-        // 2. Zugnummer in Name: "ICE 579" enthält "579"
-        // 3. Vollständiger Name: "ICE579" enthält "ICE579"
+        // Flexibles Matching
         const matches =
           (searchNum && fahrtNr === searchNum) ||
           (searchNum && lineName.includes(searchNum)) ||
@@ -173,16 +142,15 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
         }
       });
 
-      // Bei erstem Fund abbrechen - für direkte Suche reicht ein Ergebnis
+      // Bei erstem Fund abbrechen
       if (matchingDepartures.length >= 1) break;
     } catch (e) {
       console.warn(`Station ${stationId} failed:`, e);
-      // Bei Fehler längere Pause, dann weitermachen
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
   }
 
-  // Hole Trip-Details für gefundene Züge (max 3 für schnelle Suche)
+  // Hole Trip-Details
   const limitedDepartures = matchingDepartures.slice(0, 3);
   const results: TrainJourney[] = [];
 
@@ -194,7 +162,6 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
         if (journey) results.push(journey);
       }
 
-      // Bei direkter Suche: Erster Treffer reicht meist
       if (results.length >= 1) break;
     } catch (e) {
       console.warn(`Trip ${tripId} failed:`, e);
@@ -211,27 +178,37 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
 
 function convertToTrainJourney(trip: any): TrainJourney | null {
   if (!trip.stopovers?.length) return null;
+
   const stops: TrainStop[] = trip.stopovers.map((s: any) => ({
-    station: { id: s.stop.id, name: s.stop.name, location: s.stop.location },
-    arrival: s.arrival, plannedArrival: s.plannedArrival,
-    departure: s.departure, plannedDeparture: s.plannedDeparture,
-    arrivalDelay: s.arrivalDelay, departureDelay: s.departureDelay,
-    platform: s.platform, plannedPlatform: s.plannedPlatform,
+    station: { id: s.stop?.id, name: s.stop?.name, location: s.stop?.location },
+    arrival: s.arrival,
+    plannedArrival: s.plannedArrival,
+    departure: s.departure,
+    plannedDeparture: s.plannedDeparture,
+    arrivalDelay: s.arrivalDelay,
+    departureDelay: s.departureDelay,
+    platform: s.platform,
+    plannedPlatform: s.plannedPlatform,
   }));
+
   const lineName = trip.line?.name || '';
   const trainType = lineName.split(' ')[0] || trip.line?.product || 'Zug';
-  return { tripId: trip.id, trainNumber: lineName.split(' ').slice(1).join(' '), trainType, trainName: lineName, direction: trip.direction, stops, origin: stops[0], destination: stops[stops.length - 1] };
+
+  return {
+    tripId: trip.id,
+    trainNumber: lineName.split(' ').slice(1).join(' '),
+    trainType,
+    trainName: lineName,
+    direction: trip.direction,
+    stops,
+    origin: stops[0],
+    destination: stops[stops.length - 1],
+  };
 }
 
 export async function getNearbyStations(lat: number, lon: number): Promise<any[]> {
-  const url = buildUrl('/stops/nearby', {
-    latitude: String(lat),
-    longitude: String(lon),
-    results: '5',
-    distance: '2000',
-  });
-
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`API error: ${response.status}`);
-  return response.json();
+  // Diese Funktion wird vorerst nicht unterstützt mit db-vendo-client
+  // TODO: Implementieren wenn nötig
+  console.warn('getNearbyStations not yet implemented with new API');
+  return [];
 }
