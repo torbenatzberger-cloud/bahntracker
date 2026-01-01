@@ -53,7 +53,8 @@ export async function getTrips(): Promise<Trip[]> {
 export async function deleteTrip(tripId: string): Promise<void> {
   const trips = await getTrips();
   const tripToDelete = trips.find(t => t.id === tripId);
-  await AsyncStorage.setItem(TRIPS_KEY, JSON.stringify(trips.filter(t => t.id !== tripId)));
+  const remainingTrips = trips.filter(t => t.id !== tripId);
+  await AsyncStorage.setItem(TRIPS_KEY, JSON.stringify(remainingTrips));
 
   // Aus Supabase löschen (wenn konfiguriert)
   if (isSupabaseConfigured() && tripToDelete) {
@@ -69,6 +70,9 @@ export async function deleteTrip(tripId: string): Promise<void> {
       console.warn('Supabase delete failed:', error);
     }
   }
+
+  // Achievements neu berechnen nach Löschen
+  await checkAchievements(remainingTrips);
 }
 
 export async function updateTrip(updatedTrip: Trip): Promise<void> {

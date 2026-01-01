@@ -33,8 +33,9 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
       const response = await fetch(url);
       if (response.ok) return response;
 
-      // Bei 503 (Service Unavailable) warten und erneut versuchen
-      if (response.status === 503 && i < retries - 1) {
+      // Bei 503 oder 500 (Server-Fehler) warten und erneut versuchen
+      if ((response.status === 503 || response.status === 500) && i < retries - 1) {
+        console.log(`API returned ${response.status}, retrying in ${delay * (i + 1)}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
         continue;
       }
@@ -42,6 +43,7 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
       throw new Error(`API error: ${response.status}`);
     } catch (e) {
       if (i === retries - 1) throw e;
+      console.log(`Fetch failed, retrying in ${delay * (i + 1)}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
     }
   }
@@ -94,6 +96,11 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   // Sequentielle Anfragen um Rate Limiting zu vermeiden
   for (const stationId of majorStations) {
     try {
+      // Kleine Pause zwischen Stationsanfragen
+      if (matchingDepartures.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
       const departures = await getDepartures(stationId);
       departures.forEach((dep: any) => {
         const lineName = dep.line?.name?.toUpperCase() || '';
@@ -112,8 +119,8 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
       if (matchingDepartures.length >= 5) break;
     } catch (e) {
       console.warn(`Station ${stationId} failed:`, e);
-      // Kurze Pause bei Fehler
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Längere Pause bei Fehler
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 
@@ -123,6 +130,11 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
 
   for (const { tripId } of limitedDepartures) {
     try {
+      // Kleine Pause zwischen Trip-Details-Anfragen
+      if (results.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
       const tripDetails = await getTripDetails(tripId);
       if (tripDetails?.stopovers) {
         const journey = convertToTrainJourney(tripDetails);
