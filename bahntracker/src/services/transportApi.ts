@@ -20,20 +20,16 @@ export async function getTripDetails(tripId: string): Promise<any> {
 
 export async function searchTrainByNumber(trainNumber: string): Promise<TrainJourney[]> {
   const cleanedNumber = trainNumber.trim().toUpperCase();
+  if (!cleanedNumber) return [];
+
   const majorStations = ['8000105', '8000261', '8011160', '8000207', '8000152'];
-
-  // Parallele Anfragen an alle Stationen
-  const departureResults = await Promise.allSettled(
-    majorStations.map(stationId => getDepartures(stationId))
-  );
-
-  // Sammle alle passenden Züge
   const matchingDepartures: { tripId: string; dep: any }[] = [];
   const seenTripIds = new Set<string>();
 
-  departureResults.forEach((result) => {
-    if (result.status === 'fulfilled') {
-      const departures = result.value;
+  // Sequentielle Anfragen um Rate Limiting zu vermeiden
+  for (const stationId of majorStations) {
+    try {
+      const departures = await getDepartures(stationId);
       departures.forEach((dep: any) => {
         const lineName = dep.line?.name?.toUpperCase() || '';
         const fahrtNr = dep.line?.fahrtNr || '';
@@ -46,25 +42,36 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
           matchingDepartures.push({ tripId: dep.tripId, dep });
         }
       });
-    }
-  });
 
-  // Limitiere auf 10 und hole Trip-Details parallel
+      // Wenn wir genug Ergebnisse haben, brechen wir ab
+      if (matchingDepartures.length >= 5) break;
+    } catch (e) {
+      console.warn(`Station ${stationId} failed:`, e);
+      // Kurze Pause bei Fehler
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+
+  // Limitiere und hole Trip-Details sequentiell
   const limitedDepartures = matchingDepartures.slice(0, 10);
-  const tripDetailsResults = await Promise.allSettled(
-    limitedDepartures.map(({ tripId }) => getTripDetails(tripId))
-  );
-
-  // Konvertiere zu TrainJourney
   const results: TrainJourney[] = [];
-  tripDetailsResults.forEach((result) => {
-    if (result.status === 'fulfilled' && result.value?.stopovers) {
-      const journey = convertToTrainJourney(result.value);
-      if (journey) results.push(journey);
-    }
-  });
 
-  return results.slice(0, 10);
+  for (const { tripId } of limitedDepartures) {
+    try {
+      const tripDetails = await getTripDetails(tripId);
+      if (tripDetails?.stopovers) {
+        const journey = convertToTrainJourney(tripDetails);
+        if (journey) results.push(journey);
+      }
+    } catch (e) {
+      console.warn(`Trip ${tripId} failed:`, e);
+    }
+
+    // Stoppe wenn wir genug haben
+    if (results.length >= 5) break;
+  }
+
+  return results;
 }
 
 function convertToTrainJourney(trip: any): TrainJourney | null {
