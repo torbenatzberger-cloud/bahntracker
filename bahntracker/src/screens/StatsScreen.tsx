@@ -275,10 +275,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: '800',
+    ...typography.header,
     color: colors.text.primary,
-    letterSpacing: -0.5,
   },
   heroCard: {
     backgroundColor: colors.background.secondary,
@@ -289,7 +287,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   cardLabel: {
-    ...typography.caption,
+    ...typography.label,
     color: colors.text.secondary,
     marginBottom: spacing.md,
   },
@@ -300,11 +298,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   heroNumber: {
+    ...typography.hero,
     fontSize: 56,
-    fontWeight: '800',
     color: colors.text.primary,
-    letterSpacing: -2,
-    fontVariant: ['tabular-nums'],
   },
   heroUnit: {
     fontSize: 24,
@@ -322,10 +318,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   gridValue: {
+    ...typography.number,
     fontSize: 24,
-    fontWeight: '700',
     color: colors.text.primary,
-    fontVariant: ['tabular-nums'],
   },
   gridLabel: {
     fontSize: 13,
@@ -376,10 +371,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   monthStatValue: {
+    ...typography.number,
     fontSize: 20,
-    fontWeight: '700',
     color: colors.text.primary,
-    fontVariant: ['tabular-nums'],
   },
   monthStatLabel: {
     fontSize: 11,
@@ -457,10 +451,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   highlightValue: {
+    ...typography.number,
     fontSize: 18,
-    fontWeight: '700',
     color: colors.text.primary,
-    fontVariant: ['tabular-nums'],
   },
   routeCard: {
     backgroundColor: colors.background.secondary,
@@ -470,7 +463,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border.subtle,
   },
   routeLabel: {
-    ...typography.caption,
+    ...typography.label,
     color: colors.text.secondary,
     marginBottom: spacing.xs,
   },
@@ -486,7 +479,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
   },
   achievementGroupTitle: {
-    ...typography.caption,
+    ...typography.label,
     color: colors.text.secondary,
     marginBottom: spacing.md,
   },
@@ -562,9 +555,10 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
   },
   progressText: {
+    ...typography.number,
     fontSize: 11,
+    fontWeight: '500',
     color: colors.text.tertiary,
     marginTop: spacing.xs,
-    fontVariant: ['tabular-nums'],
   },
 });

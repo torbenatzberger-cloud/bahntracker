@@ -71,6 +71,53 @@ export async function deleteTrip(tripId: string): Promise<void> {
   }
 }
 
+export async function updateTrip(updatedTrip: Trip): Promise<void> {
+  // Lokal aktualisieren
+  const trips = await getTrips();
+  const index = trips.findIndex(t => t.id === updatedTrip.id);
+  if (index === -1) {
+    throw new Error('Trip not found');
+  }
+
+  const originalTrip = trips[index];
+  trips[index] = updatedTrip;
+  await AsyncStorage.setItem(TRIPS_KEY, JSON.stringify(trips));
+
+  // In Supabase aktualisieren (wenn konfiguriert)
+  if (isSupabaseConfigured()) {
+    try {
+      const deviceId = await getDeviceId();
+      await supabase
+        .from('trips')
+        .update({
+          train_number: updatedTrip.trainNumber,
+          train_type: updatedTrip.trainType,
+          train_name: updatedTrip.trainName,
+          origin_station: updatedTrip.originStation,
+          origin_station_id: updatedTrip.originStationId,
+          destination_station: updatedTrip.destinationStation,
+          destination_station_id: updatedTrip.destinationStationId,
+          departure_planned: updatedTrip.departurePlanned,
+          departure_actual: updatedTrip.departureActual,
+          arrival_planned: updatedTrip.arrivalPlanned,
+          arrival_actual: updatedTrip.arrivalActual,
+          delay_minutes: updatedTrip.delayMinutes,
+          distance_km: updatedTrip.distanceKm,
+          duration_minutes: updatedTrip.durationMinutes,
+          co2_saved_kg: updatedTrip.co2SavedKg,
+        })
+        .eq('device_id', deviceId)
+        .eq('trip_id', originalTrip.tripId)
+        .eq('created_at', originalTrip.createdAt);
+    } catch (error) {
+      console.warn('Supabase update failed:', error);
+    }
+  }
+
+  // Achievements neu berechnen
+  await checkAchievements(trips);
+}
+
 // Synchronisiert lokale Daten mit Supabase
 export async function syncWithCloud(): Promise<{ synced: number; error?: string }> {
   if (!isSupabaseConfigured()) {

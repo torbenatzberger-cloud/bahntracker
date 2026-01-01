@@ -81,16 +81,17 @@ export const borderRadius = {
 };
 
 export const typography = {
-  // Hero Zahlen
+  // Hero Zahlen (große Statistiken)
   hero: {
-    fontSize: 48,
+    fontSize: 52,
     fontWeight: '800' as const,
     letterSpacing: -2,
+    fontVariant: ['tabular-nums'] as const,
   },
   // Section Headers
   header: {
-    fontSize: 24,
-    fontWeight: '700' as const,
+    fontSize: 28,
+    fontWeight: '800' as const,
     letterSpacing: -0.5,
   },
   // Card Titles
@@ -101,9 +102,16 @@ export const typography = {
   // Body Text
   body: {
     fontSize: 15,
-    fontWeight: '400' as const,
+    fontWeight: '500' as const,
   },
-  // Labels/Captions
+  // Labels/Captions (UPPERCASE)
+  label: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase' as const,
+  },
+  // Legacy caption (für Kompatibilität)
   caption: {
     fontSize: 12,
     fontWeight: '600' as const,
@@ -115,6 +123,11 @@ export const typography = {
     fontSize: 11,
     fontWeight: '700' as const,
     textTransform: 'uppercase' as const,
+  },
+  // Zahlen (mit tabular-nums)
+  number: {
+    fontVariant: ['tabular-nums'] as const,
+    fontWeight: '700' as const,
   },
 };
 
@@ -162,4 +175,34 @@ export const cardStyle = {
 export const gradients = {
   spending: ['#EAB308', '#22C55E'],
   progress: ['#3B82F6', '#8B5CF6'],
+};
+
+// Input Style Helper
+export const inputStyle = {
+  backgroundColor: colors.background.tertiary,
+  borderRadius: borderRadius.lg,
+  borderWidth: 1,
+  borderColor: colors.border.default,
+  paddingHorizontal: spacing.lg,
+  paddingVertical: spacing.md,
+  fontSize: 18,
+  color: colors.text.primary,
+  fontWeight: '600' as const,
+};
+
+// Modal Style Helper
+export const modalStyle = {
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end' as const,
+  },
+  content: {
+    backgroundColor: colors.background.secondary,
+    borderTopLeftRadius: borderRadius.xxl,
+    borderTopRightRadius: borderRadius.xxl,
+    paddingTop: spacing.xl,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: 40,
+  },
 };

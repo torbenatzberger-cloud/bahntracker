@@ -21,29 +21,50 @@ export async function getTripDetails(tripId: string): Promise<any> {
 export async function searchTrainByNumber(trainNumber: string): Promise<TrainJourney[]> {
   const cleanedNumber = trainNumber.trim().toUpperCase();
   const majorStations = ['8000105', '8000261', '8011160', '8000207', '8000152'];
-  const results: TrainJourney[] = [];
 
-  for (const stationId of majorStations) {
-    try {
-      const departures = await getDepartures(stationId);
-      const matching = departures.filter((dep: any) => {
+  // Parallele Anfragen an alle Stationen
+  const departureResults = await Promise.allSettled(
+    majorStations.map(stationId => getDepartures(stationId))
+  );
+
+  // Sammle alle passenden Züge
+  const matchingDepartures: { tripId: string; dep: any }[] = [];
+  const seenTripIds = new Set<string>();
+
+  departureResults.forEach((result) => {
+    if (result.status === 'fulfilled') {
+      const departures = result.value;
+      departures.forEach((dep: any) => {
         const lineName = dep.line?.name?.toUpperCase() || '';
         const fahrtNr = dep.line?.fahrtNr || '';
-        return lineName.includes(cleanedNumber) || fahrtNr === cleanedNumber.replace(/\D/g, '') || lineName.replace(/\s/g, '') === cleanedNumber.replace(/\s/g, '');
-      });
+        const matches = lineName.includes(cleanedNumber) ||
+          fahrtNr === cleanedNumber.replace(/\D/g, '') ||
+          lineName.replace(/\s/g, '') === cleanedNumber.replace(/\s/g, '');
 
-      for (const dep of matching) {
-        if (results.some(r => r.tripId === dep.tripId)) continue;
-        const tripDetails = await getTripDetails(dep.tripId);
-        if (tripDetails?.stopovers) {
-          const journey = convertToTrainJourney(tripDetails);
-          if (journey) results.push(journey);
+        if (matches && !seenTripIds.has(dep.tripId)) {
+          seenTripIds.add(dep.tripId);
+          matchingDepartures.push({ tripId: dep.tripId, dep });
         }
-      }
-      if (results.length > 0) break;
-    } catch (e) { console.warn(`Station ${stationId} failed:`, e); }
-  }
-  return results;
+      });
+    }
+  });
+
+  // Limitiere auf 10 und hole Trip-Details parallel
+  const limitedDepartures = matchingDepartures.slice(0, 10);
+  const tripDetailsResults = await Promise.allSettled(
+    limitedDepartures.map(({ tripId }) => getTripDetails(tripId))
+  );
+
+  // Konvertiere zu TrainJourney
+  const results: TrainJourney[] = [];
+  tripDetailsResults.forEach((result) => {
+    if (result.status === 'fulfilled' && result.value?.stopovers) {
+      const journey = convertToTrainJourney(result.value);
+      if (journey) results.push(journey);
+    }
+  });
+
+  return results.slice(0, 10);
 }
 
 function convertToTrainJourney(trip: any): TrainJourney | null {
