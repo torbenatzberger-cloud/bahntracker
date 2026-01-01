@@ -1,7 +1,20 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, SafeAreaView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  FlatList,
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+} from 'react-native';
 import { searchTrainByNumber } from '../services/transportApi';
 import { TrainJourney } from '../types';
+import { colors, spacing, borderRadius, typography, getTrainTypeColor } from '../theme';
 
 export default function HomeScreen({ navigation }: any) {
   const [trainNumber, setTrainNumber] = useState('');
@@ -11,91 +24,394 @@ export default function HomeScreen({ navigation }: any) {
   const [searched, setSearched] = useState(false);
 
   const handleSearch = useCallback(async () => {
-    if (!trainNumber.trim()) { Alert.alert('Fehler', 'Bitte Zugnummer eingeben'); return; }
-    setLoading(true); setError(null); setSearched(true);
+    if (!trainNumber.trim()) {
+      Alert.alert('Fehler', 'Bitte Zugnummer eingeben');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setSearched(true);
     try {
       const journeys = await searchTrainByNumber(trainNumber);
       setResults(journeys);
-      if (journeys.length === 0) setError('Kein Zug gefunden. Versuche "ICE 123" oder nur "123".');
-      else if (journeys.length === 1) navigation.navigate('TripDetail', { journey: journeys[0] });
-    } catch { setError('Fehler bei der Suche.'); }
-    finally { setLoading(false); }
+      if (journeys.length === 0) {
+        setError('Kein Zug gefunden. Versuche "ICE 123" oder nur "123".');
+      } else if (journeys.length === 1) {
+        navigation.navigate('TripDetail', { journey: journeys[0] });
+      }
+    } catch {
+      setError('Fehler bei der Suche.');
+    } finally {
+      setLoading(false);
+    }
   }, [trainNumber, navigation]);
 
-  const formatTime = (d?: string) => d ? new Date(d).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '--:--';
+  const formatTime = (d?: string) =>
+    d ? new Date(d).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '--:--';
+
+  const renderJourneyCard = ({ item }: { item: TrainJourney }) => (
+    <TouchableOpacity
+      style={styles.journeyCard}
+      onPress={() => navigation.navigate('TripDetail', { journey: item })}
+      activeOpacity={0.7}
+    >
+      <View style={styles.journeyHeader}>
+        <View style={[styles.trainBadge, { backgroundColor: getTrainTypeColor(item.trainType) }]}>
+          <Text style={styles.trainBadgeText}>{item.trainType}</Text>
+        </View>
+        <Text style={styles.trainName}>{item.trainName}</Text>
+        <Text style={styles.directionText}>{item.direction}</Text>
+      </View>
+      <View style={styles.journeyRoute}>
+        <View style={styles.routePoint}>
+          <View style={styles.routeDotStart} />
+          <View style={styles.routeStationInfo}>
+            <Text style={styles.stationName} numberOfLines={1}>
+              {item.origin.station.name}
+            </Text>
+            <Text style={styles.routeTime}>{formatTime(item.origin.departure)}</Text>
+          </View>
+        </View>
+        <View style={styles.routeConnector}>
+          <View style={styles.routeLine} />
+        </View>
+        <View style={styles.routePoint}>
+          <View style={styles.routeDotEnd} />
+          <View style={styles.routeStationInfo}>
+            <Text style={styles.stationName} numberOfLines={1}>
+              {item.destination.station.name}
+            </Text>
+            <Text style={styles.routeTime}>{formatTime(item.destination.arrival)}</Text>
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
+      >
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>🚄 BahnTracker</Text>
+          <Text style={styles.headerTitle}>BahnTracker</Text>
           <Text style={styles.headerSubtitle}>Tracke deine Zugfahrten</Text>
         </View>
+
         <View style={styles.inputSection}>
-          <Text style={styles.inputLabel}>Zugnummer eingeben</Text>
+          <Text style={styles.inputLabel}>ZUGNUMMER</Text>
           <View style={styles.inputRow}>
-            <TextInput style={styles.input} value={trainNumber} onChangeText={setTrainNumber} placeholder="z.B. ICE 123" placeholderTextColor="#94a3b8" autoCapitalize="characters" returnKeyType="search" onSubmitEditing={handleSearch} />
-            <TouchableOpacity style={[styles.searchButton, loading && styles.searchButtonDisabled]} onPress={handleSearch} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.searchButtonText}>Suchen</Text>}
+            <TextInput
+              style={styles.input}
+              value={trainNumber}
+              onChangeText={setTrainNumber}
+              placeholder="z.B. ICE 123"
+              placeholderTextColor={colors.text.tertiary}
+              autoCapitalize="characters"
+              returnKeyType="search"
+              onSubmitEditing={handleSearch}
+            />
+            <TouchableOpacity
+              style={[styles.searchButton, loading && styles.searchButtonDisabled]}
+              onPress={handleSearch}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.searchButtonText}>Suchen</Text>
+              )}
             </TouchableOpacity>
           </View>
+
           <View style={styles.quickButtons}>
-            {['ICE', 'IC', 'RE', 'RB'].map(t => <TouchableOpacity key={t} style={styles.quickButton} onPress={() => setTrainNumber(t + ' ')}><Text style={styles.quickButtonText}>{t}</Text></TouchableOpacity>)}
+            {['ICE', 'IC', 'RE', 'RB'].map((type) => (
+              <TouchableOpacity
+                key={type}
+                style={[styles.quickButton, { borderColor: getTrainTypeColor(type) }]}
+                onPress={() => setTrainNumber(type + ' ')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.quickButtonText, { color: getTrainTypeColor(type) }]}>
+                  {type}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
+
         <View style={styles.resultsSection}>
-          {error && <View style={styles.errorContainer}><Text style={styles.errorText}>{error}</Text></View>}
-          {results.length > 1 && <Text style={styles.resultsTitle}>{results.length} Züge gefunden:</Text>}
-          <FlatList data={results} keyExtractor={i => i.tripId} renderItem={({ item }) => (
-            <TouchableOpacity style={styles.journeyCard} onPress={() => navigation.navigate('TripDetail', { journey: item })}>
-              <View style={styles.journeyHeader}><View style={styles.trainBadge}><Text style={styles.trainBadgeText}>{item.trainType}</Text></View><Text style={styles.trainName}>{item.trainName}</Text></View>
-              <View style={styles.journeyRoute}>
-                <View style={styles.routePoint}><View style={styles.routeDot} /><Text style={styles.stationName} numberOfLines={1}>{item.origin.station.name}</Text><Text style={styles.routeTime}>{formatTime(item.origin.departure)}</Text></View>
-                <View style={styles.routeLine} />
-                <View style={styles.routePoint}><View style={[styles.routeDot, styles.routeDotEnd]} /><Text style={styles.stationName} numberOfLines={1}>{item.destination.station.name}</Text><Text style={styles.routeTime}>{formatTime(item.destination.arrival)}</Text></View>
-              </View>
-            </TouchableOpacity>
-          )} />
+          {error && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
+          {results.length > 1 && (
+            <Text style={styles.resultsTitle}>{results.length} Verbindungen gefunden</Text>
+          )}
+
+          <FlatList
+            data={results}
+            keyExtractor={(item) => item.tripId}
+            renderItem={renderJourneyCard}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listContent}
+          />
         </View>
-        {!searched && <View style={styles.tipsSection}><Text style={styles.tipsTitle}>💡 Tipps</Text><Text style={styles.tipsText}>• Die Zugnummer findest du auf deinem Ticket{'\n'}• Du kannst "ICE 579" oder nur "579" eingeben</Text></View>}
+
+        {!searched && (
+          <View style={styles.tipsSection}>
+            <View style={styles.tipsCard}>
+              <Text style={styles.tipsTitle}>So funktioniert's</Text>
+              <View style={styles.tipItem}>
+                <Text style={styles.tipBullet}>1</Text>
+                <Text style={styles.tipText}>Zugnummer vom Ticket eingeben</Text>
+              </View>
+              <View style={styles.tipItem}>
+                <Text style={styles.tipBullet}>2</Text>
+                <Text style={styles.tipText}>Start- und Zielbahnhof wählen</Text>
+              </View>
+              <View style={styles.tipItem}>
+                <Text style={styles.tipBullet}>3</Text>
+                <Text style={styles.tipText}>Fahrt speichern und Statistiken sehen</Text>
+              </View>
+            </View>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  keyboardView: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
-  headerTitle: { fontSize: 32, fontWeight: '800', color: '#f8fafc', letterSpacing: -1 },
-  headerSubtitle: { fontSize: 16, color: '#64748b', marginTop: 4 },
-  inputSection: { paddingHorizontal: 20, paddingVertical: 16 },
-  inputLabel: { fontSize: 14, fontWeight: '600', color: '#94a3b8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 },
-  inputRow: { flexDirection: 'row', gap: 12 },
-  input: { flex: 1, height: 56, backgroundColor: '#1e293b', borderRadius: 12, paddingHorizontal: 16, fontSize: 18, color: '#f8fafc', fontWeight: '600', borderWidth: 2, borderColor: '#334155' },
-  searchButton: { height: 56, paddingHorizontal: 24, backgroundColor: '#dc2626', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  searchButtonDisabled: { backgroundColor: '#7f1d1d' },
-  searchButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  quickButtons: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  quickButton: { paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#1e293b', borderRadius: 8, borderWidth: 1, borderColor: '#334155' },
-  quickButtonText: { color: '#94a3b8', fontSize: 14, fontWeight: '600' },
-  resultsSection: { flex: 1, paddingHorizontal: 20 },
-  resultsTitle: { fontSize: 14, color: '#64748b', marginBottom: 12 },
-  journeyCard: { backgroundColor: '#1e293b', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
-  journeyHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  trainBadge: { backgroundColor: '#dc2626', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, marginRight: 10 },
-  trainBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
-  trainName: { fontSize: 18, fontWeight: '700', color: '#f8fafc' },
-  journeyRoute: { marginLeft: 8 },
-  routePoint: { flexDirection: 'row', alignItems: 'center' },
-  routeDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#22c55e', marginRight: 12 },
-  routeDotEnd: { backgroundColor: '#ef4444' },
-  stationName: { flex: 1, fontSize: 15, color: '#e2e8f0', fontWeight: '500' },
-  routeTime: { fontSize: 14, color: '#64748b', fontWeight: '600' },
-  routeLine: { width: 2, height: 20, backgroundColor: '#334155', marginLeft: 5, marginVertical: 4 },
-  errorContainer: { backgroundColor: '#7f1d1d', padding: 16, borderRadius: 12, marginBottom: 16 },
-  errorText: { color: '#fecaca', fontSize: 14, textAlign: 'center' },
-  tipsSection: { paddingHorizontal: 20, paddingBottom: 20 },
-  tipsTitle: { fontSize: 16, fontWeight: '700', color: '#f8fafc', marginBottom: 8 },
-  tipsText: { fontSize: 14, color: '#64748b', lineHeight: 22 },
+  container: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.lg,
+  },
+  headerTitle: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: colors.text.primary,
+    letterSpacing: -1,
+  },
+  headerSubtitle: {
+    fontSize: 16,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+  },
+  inputSection: {
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+  },
+  inputLabel: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    marginBottom: spacing.sm,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  input: {
+    flex: 1,
+    height: 56,
+    backgroundColor: colors.background.tertiary,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.lg,
+    fontSize: 18,
+    color: colors.text.primary,
+    fontWeight: '600',
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  searchButton: {
+    height: 56,
+    paddingHorizontal: spacing.xxl,
+    backgroundColor: colors.accent.blue,
+    borderRadius: borderRadius.lg,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchButtonDisabled: {
+    backgroundColor: colors.background.tertiary,
+  },
+  searchButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  quickButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  quickButton: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: 'transparent',
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+  },
+  quickButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  resultsSection: {
+    flex: 1,
+    paddingHorizontal: spacing.xl,
+  },
+  resultsTitle: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    marginBottom: spacing.md,
+  },
+  listContent: {
+    paddingBottom: spacing.xl,
+  },
+  journeyCard: {
+    backgroundColor: colors.background.secondary,
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+  },
+  journeyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  trainBadge: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: borderRadius.sm,
+    marginRight: spacing.sm,
+  },
+  trainBadgeText: {
+    color: '#fff',
+    ...typography.badge,
+  },
+  trainName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+    flex: 1,
+  },
+  directionText: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+  },
+  journeyRoute: {
+    marginLeft: spacing.xs,
+  },
+  routePoint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  routeStationInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  routeDotStart: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.accent.green,
+    marginRight: spacing.md,
+  },
+  routeDotEnd: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.accent.red,
+    marginRight: spacing.md,
+  },
+  stationName: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.text.primary,
+    fontWeight: '500',
+    marginRight: spacing.md,
+  },
+  routeTime: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  routeConnector: {
+    marginLeft: 5,
+    paddingVertical: spacing.xs,
+  },
+  routeLine: {
+    width: 2,
+    height: 24,
+    backgroundColor: colors.border.default,
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(248, 81, 73, 0.15)',
+    padding: spacing.lg,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(248, 81, 73, 0.3)',
+  },
+  errorText: {
+    color: colors.accent.red,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  tipsSection: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
+  },
+  tipsCard: {
+    backgroundColor: colors.background.secondary,
+    borderRadius: borderRadius.xl,
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+  },
+  tipsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: spacing.lg,
+  },
+  tipItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  tipBullet: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.accent.blue,
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginRight: spacing.md,
+    overflow: 'hidden',
+  },
+  tipText: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    flex: 1,
+  },
 });
