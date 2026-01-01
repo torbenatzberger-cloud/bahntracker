@@ -1,13 +1,19 @@
 import { TrainJourney, TrainStop } from '../types';
+import { Platform } from 'react-native';
 
-// Nutze Proxy für Web, direkte API für native Apps
-const isWeb = typeof window !== 'undefined' && window.location?.hostname?.includes('vercel');
-const API_BASE = isWeb ? '/api/transport' : 'https://v6.db.transport.rest';
+function isWebEnvironment(): boolean {
+  // Check if running in browser (web)
+  if (Platform.OS === 'web') return true;
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') return true;
+  return false;
+}
 
 function buildUrl(endpoint: string, params: Record<string, string> = {}): string {
-  if (isWeb) {
+  const isWeb = isWebEnvironment();
+
+  if (isWeb && typeof window !== 'undefined') {
     // Für Web: nutze Proxy
-    const url = new URL(API_BASE, window.location.origin);
+    const url = new URL('/api/transport', window.location.origin);
     url.searchParams.set('endpoint', endpoint);
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.set(key, value);
