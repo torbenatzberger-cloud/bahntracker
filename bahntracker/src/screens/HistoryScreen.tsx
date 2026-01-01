@@ -55,8 +55,17 @@ export default function HistoryScreen() {
         text: 'Löschen',
         style: 'destructive',
         onPress: async () => {
-          await deleteTrip(t.id);
-          loadTrips();
+          // Optimistisches Update: Sofort aus UI entfernen
+          setTrips(prev => prev.filter(trip => trip.id !== t.id));
+
+          // Im Hintergrund löschen
+          try {
+            await deleteTrip(t.id);
+          } catch (error) {
+            // Bei Fehler: UI zurücksetzen
+            loadTrips();
+            Alert.alert('Fehler', 'Konnte die Fahrt nicht löschen. Bitte erneut versuchen.');
+          }
         },
       },
     ]);

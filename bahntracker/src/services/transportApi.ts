@@ -133,15 +133,11 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   const searchNum = cleanedNumber.replace(/\D/g, ''); // Nur Ziffern: "579"
   const searchFull = cleanedNumber.replace(/\s/g, ''); // Ohne Leerzeichen: "ICE579"
 
-  // 7 große Knotenbahnhöfe für bessere Abdeckung
+  // 3 große Knotenbahnhöfe - weniger API-Last, schnellere Suche
   const majorStations = [
-    '8000105', // Frankfurt Hbf
+    '8000105', // Frankfurt Hbf - zentraler Knotenpunkt
     '8000261', // München Hbf
     '8011160', // Berlin Hbf
-    '8000207', // Köln Hbf
-    '8002549', // Hamburg Hbf
-    '8000096', // Stuttgart Hbf
-    '8000152', // Hannover Hbf
   ];
 
   const matchingDepartures: { tripId: string; dep: any }[] = [];
@@ -151,9 +147,9 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   for (let i = 0; i < majorStations.length; i++) {
     const stationId = majorStations[i];
     try {
-      // Pause vor jeder Anfrage (außer der ersten)
+      // Pause vor jeder Anfrage (außer der ersten) - länger für API-Stabilität
       if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
       const departures = await getDepartures(stationId);
@@ -177,8 +173,8 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
         }
       });
 
-      // Wenn wir genug Ergebnisse haben, brechen wir ab
-      if (matchingDepartures.length >= 5) break;
+      // Bei erstem Fund abbrechen - für direkte Suche reicht ein Ergebnis
+      if (matchingDepartures.length >= 1) break;
     } catch (e) {
       console.warn(`Station ${stationId} failed:`, e);
       // Bei Fehler längere Pause, dann weitermachen
@@ -186,8 +182,8 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
     }
   }
 
-  // Limitiere und hole Trip-Details sequentiell
-  const limitedDepartures = matchingDepartures.slice(0, 8);
+  // Hole Trip-Details für gefundene Züge (max 3 für schnelle Suche)
+  const limitedDepartures = matchingDepartures.slice(0, 3);
   const results: TrainJourney[] = [];
 
   for (const { tripId } of limitedDepartures) {
@@ -198,11 +194,8 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
         if (journey) results.push(journey);
       }
 
-      // Stoppe wenn wir genug haben
-      if (results.length >= 5) break;
-
-      // Kleine Pause zwischen Anfragen
-      await new Promise(resolve => setTimeout(resolve, 30));
+      // Bei direkter Suche: Erster Treffer reicht meist
+      if (results.length >= 1) break;
     } catch (e) {
       console.warn(`Trip ${tripId} failed:`, e);
     }
