@@ -84,8 +84,8 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
 
 export async function getDepartures(stationId: string): Promise<any[]> {
   const url = buildUrl(`/stops/${stationId}/departures`, {
-    duration: '240', // 4 Stunden für mehr Ergebnisse
-    results: '50',   // Mehr Ergebnisse pro Station
+    duration: '120', // 2 Stunden - weniger Last auf API
+    results: '30',   // Weniger Ergebnisse - schnellere Response
     nationalExpress: 'true',
     national: 'true',
     regionalExpress: 'true',
@@ -98,7 +98,8 @@ export async function getDepartures(stationId: string): Promise<any[]> {
     taxi: 'false',
   });
 
-  const response = await fetchWithRetry(url, 2, 500);
+  // Mehr Retries mit längeren Pausen bei 503
+  const response = await fetchWithRetry(url, 4, 1000);
   const data = await response.json();
   return data.departures || data;
 }
@@ -146,9 +147,15 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   const matchingDepartures: { tripId: string; dep: any }[] = [];
   const seenTripIds = new Set<string>();
 
-  // Sequentielle Anfragen um Rate Limiting zu vermeiden
-  for (const stationId of majorStations) {
+  // Sequentielle Anfragen mit Pausen um Rate Limiting zu vermeiden
+  for (let i = 0; i < majorStations.length; i++) {
+    const stationId = majorStations[i];
     try {
+      // Pause vor jeder Anfrage (außer der ersten)
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
       const departures = await getDepartures(stationId);
       departures.forEach((dep: any) => {
         const lineName = (dep.line?.name || '').toUpperCase();
@@ -172,12 +179,10 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
 
       // Wenn wir genug Ergebnisse haben, brechen wir ab
       if (matchingDepartures.length >= 5) break;
-
-      // Kleine Pause zwischen Anfragen
-      await new Promise(resolve => setTimeout(resolve, 50));
     } catch (e) {
       console.warn(`Station ${stationId} failed:`, e);
-      // Bei Fehler weitermachen mit nächster Station
+      // Bei Fehler längere Pause, dann weitermachen
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 

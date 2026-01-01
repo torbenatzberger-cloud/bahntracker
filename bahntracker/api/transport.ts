@@ -54,24 +54,28 @@ function setCache(key: string, data: any): void {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-// Retry mit exponential backoff
-async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<Response> {
+// Retry mit exponential backoff - aggressiver bei 503
+async function fetchWithRetry(url: string, retries = 5, delay = 1500): Promise<Response> {
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url);
 
       if (response.ok) return response;
 
-      // Bei 503/500 warten und erneut versuchen
-      if ((response.status === 503 || response.status === 500) && i < retries - 1) {
-        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+      // Bei 503/500/429 warten und erneut versuchen
+      if ((response.status === 503 || response.status === 500 || response.status === 429) && i < retries - 1) {
+        const waitTime = delay * Math.pow(1.5, i); // Exponential: 1500, 2250, 3375, 5062ms
+        console.log(`API returned ${response.status}, retry ${i + 1}/${retries - 1} in ${waitTime}ms`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
 
       return response; // Fehler-Response zurückgeben
     } catch (e) {
       if (i === retries - 1) throw e;
-      await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+      const waitTime = delay * Math.pow(1.5, i);
+      console.log(`Fetch error, retry ${i + 1}/${retries - 1} in ${waitTime}ms`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
   throw new Error('Max retries reached');
