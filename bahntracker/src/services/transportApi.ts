@@ -108,11 +108,18 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   const searchNum = cleanedNumber.replace(/\D/g, ''); // Nur Ziffern: "579"
   const searchFull = cleanedNumber.replace(/\s/g, ''); // Ohne Leerzeichen: "ICE579"
 
-  // 3 große Knotenbahnhöfe
+  // Große Knotenbahnhöfe für maximale Abdeckung
   const majorStations = [
     '8000105', // Frankfurt Hbf
     '8000261', // München Hbf
     '8011160', // Berlin Hbf
+    '8000152', // Hannover Hbf
+    '8000207', // Köln Hbf
+    '8000096', // Stuttgart Hbf
+    '8000284', // Nürnberg Hbf
+    '8010224', // Leipzig Hbf
+    '8000191', // Karlsruhe Hbf
+    '8000050', // Bremen Hbf
   ];
 
   const matchingDepartures: { tripId: string; dep: any }[] = [];

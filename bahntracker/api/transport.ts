@@ -101,8 +101,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const url = new URL(`/stops/${stationId}/departures`, API_BASE);
-      url.searchParams.set('duration', '120');
-      url.searchParams.set('results', '30');
+      url.searchParams.set('duration', '180'); // 3 Stunden
+      url.searchParams.set('results', '50');
 
       const response = await fetchWithRetry(url.toString());
 
