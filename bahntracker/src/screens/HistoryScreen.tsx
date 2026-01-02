@@ -6,51 +6,18 @@ import {
   FlatList,
   SafeAreaView,
   TouchableOpacity,
-  Alert,
   RefreshControl,
-  Modal,
-  TextInput,
-  ScrollView,
-  KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
-
-// Plattformübergreifende Alert-Funktion
-const showDeleteConfirm = (
-  title: string,
-  message: string,
-  onConfirm: () => void
-) => {
-  if (Platform.OS === 'web') {
-    // Web: window.confirm verwenden
-    if (window.confirm(`${title}\n\n${message}`)) {
-      onConfirm();
-    }
-  } else {
-    // iOS/Android: Native Alert
-    Alert.alert(title, message, [
-      { text: 'Abbrechen', style: 'cancel' },
-      { text: 'Löschen', style: 'destructive', onPress: onConfirm },
-    ]);
-  }
-};
 import { useFocusEffect } from '@react-navigation/native';
 import { Trip } from '../types';
-import { getTrips, deleteTrip, updateTrip } from '../services/storage';
-import { colors, spacing, borderRadius, typography, getTrainTypeColor, getDelayColor, inputStyle, modalStyle } from '../theme';
+import { getTrips, deleteTrip } from '../services/storage';
+import { colors, spacing, borderRadius, typography, getTrainTypeColor, getDelayColor } from '../theme';
 
 export default function HistoryScreen() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
-  const [editForm, setEditForm] = useState({
-    trainName: '',
-    originStation: '',
-    destinationStation: '',
-    distanceKm: '',
-    delayMinutes: '',
-  });
 
   const loadTrips = useCallback(async () => {
     setTrips(await getTrips());
@@ -68,74 +35,22 @@ export default function HistoryScreen() {
     setRefreshing(false);
   };
 
-  const handleDelete = (t: Trip) => {
-    const performDelete = async () => {
-      // Optimistisches Update: Sofort aus UI entfernen
-      setTrips(prev => prev.filter(trip => trip.id !== t.id));
+  // Direktes Löschen ohne Bestätigung
+  const handleDelete = async (t: Trip) => {
+    // Optimistisches Update: Sofort aus UI entfernen
+    setTrips(prev => prev.filter(trip => trip.id !== t.id));
 
-      // Im Hintergrund löschen
-      try {
-        await deleteTrip(t.id);
-      } catch (error) {
-        // Bei Fehler: UI zurücksetzen
-        loadTrips();
-        if (Platform.OS === 'web') {
-          window.alert('Konnte die Fahrt nicht löschen. Bitte erneut versuchen.');
-        } else {
-          Alert.alert('Fehler', 'Konnte die Fahrt nicht löschen. Bitte erneut versuchen.');
-        }
-      }
-    };
-
-    showDeleteConfirm(
-      'Fahrt löschen?',
-      `${t.trainName}: ${t.originStation} → ${t.destinationStation}`,
-      performDelete
-    );
-  };
-
-  const handleEdit = (trip: Trip) => {
-    setEditingTrip(trip);
-    setEditForm({
-      trainName: trip.trainName,
-      originStation: trip.originStation,
-      destinationStation: trip.destinationStation,
-      distanceKm: String(Math.round(trip.distanceKm)),
-      delayMinutes: String(trip.delayMinutes),
-    });
-    setEditModalVisible(true);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editingTrip) return;
-
-    const distanceKm = parseFloat(editForm.distanceKm) || editingTrip.distanceKm;
-    const delayMinutes = parseInt(editForm.delayMinutes, 10) || 0;
-    const co2SavedKg = distanceKm * 0.089;
-
-    const trainNameParts = editForm.trainName.trim().split(' ');
-    const trainType = trainNameParts[0] || editingTrip.trainType;
-    const trainNumber = trainNameParts.slice(1).join(' ') || editingTrip.trainNumber;
-
-    const updatedTrip: Trip = {
-      ...editingTrip,
-      trainName: editForm.trainName.trim() || editingTrip.trainName,
-      trainType,
-      trainNumber,
-      originStation: editForm.originStation.trim() || editingTrip.originStation,
-      destinationStation: editForm.destinationStation.trim() || editingTrip.destinationStation,
-      distanceKm,
-      delayMinutes,
-      co2SavedKg,
-    };
-
+    // Im Hintergrund löschen
     try {
-      await updateTrip(updatedTrip);
-      setEditModalVisible(false);
-      setEditingTrip(null);
-      loadTrips();
+      await deleteTrip(t.id);
     } catch (error) {
-      Alert.alert('Fehler', 'Konnte Fahrt nicht speichern');
+      // Bei Fehler: UI zurücksetzen
+      loadTrips();
+      if (Platform.OS === 'web') {
+        window.alert('Konnte die Fahrt nicht löschen. Bitte erneut versuchen.');
+      } else {
+        Alert.alert('Fehler', 'Konnte die Fahrt nicht löschen. Bitte erneut versuchen.');
+      }
     }
   };
 
@@ -169,13 +84,7 @@ export default function HistoryScreen() {
   }));
 
   const renderTripCard = (trip: Trip) => (
-    <TouchableOpacity
-      key={trip.id}
-      style={styles.tripCard}
-      onPress={() => handleEdit(trip)}
-      onLongPress={() => handleDelete(trip)}
-      activeOpacity={0.7}
-    >
+    <View key={trip.id} style={styles.tripCard}>
       <View style={styles.tripHeader}>
         <View style={styles.trainInfo}>
           <View style={[styles.trainBadge, { backgroundColor: getTrainTypeColor(trip.trainType) }]}>
@@ -193,10 +102,7 @@ export default function HistoryScreen() {
           )}
           <TouchableOpacity
             style={styles.deleteButton}
-            onPress={(e) => {
-              e.stopPropagation();
-              handleDelete(trip);
-            }}
+            onPress={() => handleDelete(trip)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Text style={styles.deleteButtonText}>×</Text>
@@ -240,9 +146,7 @@ export default function HistoryScreen() {
           <Text style={styles.statLabel}>kg CO₂</Text>
         </View>
       </View>
-
-      <Text style={styles.editHint}>Tippen zum Bearbeiten</Text>
-    </TouchableOpacity>
+    </View>
   );
 
   const renderSection = ({ item: section }: { item: typeof sections[0] }) => (
@@ -259,114 +163,6 @@ export default function HistoryScreen() {
       </View>
       {section.data.map(renderTripCard)}
     </View>
-  );
-
-  const renderEditModal = () => (
-    <Modal
-      visible={editModalVisible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setEditModalVisible(false)}
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.modalOverlay}
-      >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Fahrt bearbeiten</Text>
-            <TouchableOpacity
-              onPress={() => setEditModalVisible(false)}
-              style={styles.modalCloseButton}
-            >
-              <Text style={styles.modalCloseText}>×</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.modalForm} showsVerticalScrollIndicator={false}>
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>ZUGNAME</Text>
-              <TextInput
-                style={styles.formInput}
-                value={editForm.trainName}
-                onChangeText={(text) => setEditForm({ ...editForm, trainName: text })}
-                placeholder="z.B. ICE 123"
-                placeholderTextColor={colors.text.tertiary}
-              />
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>STARTBAHNHOF</Text>
-              <TextInput
-                style={styles.formInput}
-                value={editForm.originStation}
-                onChangeText={(text) => setEditForm({ ...editForm, originStation: text })}
-                placeholder="z.B. Frankfurt Hbf"
-                placeholderTextColor={colors.text.tertiary}
-              />
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>ZIELBAHNHOF</Text>
-              <TextInput
-                style={styles.formInput}
-                value={editForm.destinationStation}
-                onChangeText={(text) => setEditForm({ ...editForm, destinationStation: text })}
-                placeholder="z.B. Berlin Hbf"
-                placeholderTextColor={colors.text.tertiary}
-              />
-            </View>
-
-            <View style={styles.formRow}>
-              <View style={[styles.formGroup, { flex: 1, marginRight: spacing.md }]}>
-                <Text style={styles.formLabel}>DISTANZ (KM)</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.distanceKm}
-                  onChangeText={(text) => setEditForm({ ...editForm, distanceKm: text })}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  placeholderTextColor={colors.text.tertiary}
-                />
-              </View>
-
-              <View style={[styles.formGroup, { flex: 1 }]}>
-                <Text style={styles.formLabel}>VERSPÄTUNG (MIN)</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.delayMinutes}
-                  onChangeText={(text) => setEditForm({ ...editForm, delayMinutes: text })}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  placeholderTextColor={colors.text.tertiary}
-                />
-              </View>
-            </View>
-
-            <View style={styles.formInfo}>
-              <Text style={styles.formInfoText}>
-                CO₂-Ersparnis wird automatisch berechnet (0,089 kg/km)
-              </Text>
-            </View>
-          </ScrollView>
-
-          <View style={styles.modalActions}>
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => setEditModalVisible(false)}
-            >
-              <Text style={styles.cancelButtonText}>Abbrechen</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.saveButton}
-              onPress={handleSaveEdit}
-            >
-              <Text style={styles.saveButtonText}>Speichern</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
   );
 
   if (trips.length === 0) {
@@ -410,8 +206,6 @@ export default function HistoryScreen() {
           />
         }
       />
-
-      {renderEditModal()}
     </SafeAreaView>
   );
 }
@@ -619,12 +413,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border.default,
     marginHorizontal: spacing.lg,
   },
-  editHint: {
-    fontSize: 11,
-    color: colors.text.tertiary,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
@@ -654,103 +442,5 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 22,
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: modalStyle.overlay.backgroundColor,
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: modalStyle.content.backgroundColor,
-    borderTopLeftRadius: modalStyle.content.borderTopLeftRadius,
-    borderTopRightRadius: modalStyle.content.borderTopRightRadius,
-    paddingTop: modalStyle.content.paddingTop,
-    paddingBottom: 40,
-    maxHeight: '90%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xl,
-    marginBottom: spacing.lg,
-  },
-  modalTitle: {
-    ...typography.header,
-    fontSize: 22,
-    color: colors.text.primary,
-  },
-  modalCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalCloseText: {
-    fontSize: 24,
-    color: colors.text.secondary,
-    fontWeight: '300',
-    marginTop: -2,
-  },
-  modalForm: {
-    paddingHorizontal: spacing.xl,
-  },
-  formGroup: {
-    marginBottom: spacing.lg,
-  },
-  formLabel: {
-    ...typography.label,
-    color: colors.text.secondary,
-    marginBottom: spacing.sm,
-  },
-  formInput: {
-    ...inputStyle,
-  },
-  formRow: {
-    flexDirection: 'row',
-  },
-  formInfo: {
-    backgroundColor: colors.background.primary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  formInfoText: {
-    fontSize: 13,
-    color: colors.text.tertiary,
-    textAlign: 'center',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    gap: spacing.md,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: colors.background.primary,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.lg,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text.secondary,
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: colors.accent.blue,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.lg,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
   },
 });
