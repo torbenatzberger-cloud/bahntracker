@@ -34,7 +34,7 @@ export default function HomeScreen({ navigation }: any) {
       const results = await searchTrainByNumber(query);
 
       if (results.length === 0) {
-        setError(`Kein Zug gefunden für "${query}"`);
+        setError(`Kein Zug "${query}" gefunden. Tipp: Nur aktuell fahrende Züge können gesucht werden (z.B. "ICE 598" oder nur "598").`);
       } else if (results.length === 1) {
         // Direkt zur Detail-Ansicht
         navigation.navigate('TripDetail', { journey: results[0] });

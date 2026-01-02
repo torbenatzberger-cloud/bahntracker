@@ -208,14 +208,29 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
     return results;
   }
 
-  // STUFE 3: Fallback zu trainsearch.exe
-  console.log('[3/3] Trying trainsearch.exe fallback...');
-  results = await searchViaTrainsearch(cleanedNumber);
-  if (results.length > 0) {
-    console.log('Found via trainsearch!');
-    setCachedSearch(cleanedNumber, results);
-    return results;
+  // STUFE 2b: Bei reinen Zahlen auch mit Präfixen versuchen
+  const isNumericOnly = /^\d+$/.test(cleanedNumber);
+  if (isNumericOnly) {
+    console.log('[2b] Trying with train type prefixes...');
+    for (const prefix of ['ICE', 'IC', 'EC', 'RE', 'RB']) {
+      const withPrefix = `${prefix} ${cleanedNumber}`;
+      results = await searchViaStations(withPrefix);
+      if (results.length > 0) {
+        console.log(`Found via stations with prefix ${prefix}!`);
+        setCachedSearch(cleanedNumber, results);
+        return results;
+      }
+    }
   }
+
+  // STUFE 3: Fallback zu trainsearch.exe (deaktiviert - DB blockiert Vercel)
+  // console.log('[3/3] Trying trainsearch.exe fallback...');
+  // results = await searchViaTrainsearch(cleanedNumber);
+  // if (results.length > 0) {
+  //   console.log('Found via trainsearch!');
+  //   setCachedSearch(cleanedNumber, results);
+  //   return results;
+  // }
 
   console.log('=== NO RESULTS FOUND ===');
   return [];
