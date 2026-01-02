@@ -72,9 +72,11 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
 export async function getDepartures(stationId: string): Promise<any[]> {
   const baseUrl = getApiBaseUrl();
   const url = `${baseUrl}?action=departures&stationId=${encodeURIComponent(stationId)}`;
+  console.log('Fetching departures from:', url);
 
   const response = await fetchWithRetry(url, 3, 1000);
   const data = await response.json();
+  console.log('Got departures:', data.departures?.length || 0);
   return data.departures || [];
 }
 
@@ -125,6 +127,7 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
       }
 
       const departures = await getDepartures(stationId);
+      console.log(`Searching in ${departures.length} departures for: searchNum="${searchNum}", searchFull="${searchFull}"`);
       departures.forEach((dep: any) => {
         const lineName = (dep.line?.name || '').toUpperCase();
         const fahrtNr = String(dep.line?.fahrtNr || '');
@@ -137,6 +140,7 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
           (searchFull && lineNameNoSpace.includes(searchFull));
 
         if (matches && dep.tripId && !seenTripIds.has(dep.tripId)) {
+          console.log(`Found match: ${lineName} (fahrtNr: ${fahrtNr})`);
           seenTripIds.add(dep.tripId);
           matchingDepartures.push({ tripId: dep.tripId, dep });
         }

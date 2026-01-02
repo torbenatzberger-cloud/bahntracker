@@ -226,7 +226,7 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         </Modal>
         {/* Version */}
-        <Text style={styles.versionText}>v1.1.0</Text>
+        <Text style={styles.versionText}>v1.2.0</Text>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
