@@ -98,14 +98,42 @@ async function searchViaStations(trainNumber: string): Promise<TrainJourney[]> {
   const searchNum = trainNumber.replace(/\D/g, '');
   const searchFull = trainNumber.replace(/\s/g, '').toUpperCase();
 
-  // 6 wichtigste Knotenbahnhöfe - sequentiell abfragen
+  // Alle wichtigen Knotenbahnhöfe Deutschlands - sequentiell abfragen
   const majorStations = [
+    // Tier 1: Größte Knoten (höchste Wahrscheinlichkeit)
     '8000105', // Frankfurt Hbf
     '8000261', // München Hbf
     '8011160', // Berlin Hbf
     '8000207', // Köln Hbf
     '8000149', // Hamburg Hbf
     '8000152', // Hannover Hbf
+    // Tier 2: Wichtige Fernverkehrsknoten
+    '8000096', // Stuttgart Hbf
+    '8000085', // Düsseldorf Hbf
+    '8000284', // Nürnberg Hbf
+    '8010224', // Leipzig Hbf
+    '8000244', // Mannheim Hbf
+    '8010159', // Dresden Hbf
+    // Tier 3: Regionale Knoten
+    '8000080', // Dortmund Hbf
+    '8000098', // Essen Hbf
+    '8000191', // Karlsruhe Hbf
+    '8000050', // Bremen Hbf
+    '8003200', // Kassel-Wilhelmshöhe
+    '8000263', // Münster Hbf
+    '8010101', // Halle (Saale) Hbf
+    '8000128', // Göttingen
+    // Tier 4: Weitere wichtige Stationen
+    '8000294', // Osnabrück Hbf
+    '8000013', // Augsburg Hbf
+    '8006552', // Würzburg Hbf
+    '8000170', // Kiel Hbf
+    '8000286', // Magdeburg Hbf
+    '8000320', // Rostock Hbf
+    '8000044', // Braunschweig Hbf
+    '8000107', // Freiburg Hbf
+    '8000228', // Lübeck Hbf
+    '8000078', // Darmstadt Hbf
   ];
 
   console.log(`[Stations] Searching for: "${trainNumber}"`);
@@ -242,11 +270,26 @@ export async function getNearbyStations(lat: number, lon: number): Promise<any[]
   return [];
 }
 
-// Bekannte ICE-Strecken für journeys() Suche (reduziert)
+// Wichtige Fernverkehrsverbindungen für journeys() Suche
 const knownRoutes = [
-  { from: '8000105', to: '8011160' }, // Frankfurt → Berlin
-  { from: '8000207', to: '8000261' }, // Köln → München
+  // Nord-Süd Achsen
   { from: '8000149', to: '8000261' }, // Hamburg → München
+  { from: '8011160', to: '8000261' }, // Berlin → München
+  { from: '8000207', to: '8000261' }, // Köln → München
+  { from: '8000149', to: '8000096' }, // Hamburg → Stuttgart
+  { from: '8011160', to: '8000096' }, // Berlin → Stuttgart
+  // West-Ost Achsen
+  { from: '8000105', to: '8011160' }, // Frankfurt → Berlin
+  { from: '8000207', to: '8011160' }, // Köln → Berlin
+  { from: '8000085', to: '8010224' }, // Düsseldorf → Leipzig
+  { from: '8000207', to: '8010159' }, // Köln → Dresden
+  // Weitere wichtige Verbindungen
+  { from: '8000149', to: '8011160' }, // Hamburg → Berlin
+  { from: '8000261', to: '8010159' }, // München → Dresden
+  { from: '8000105', to: '8000149' }, // Frankfurt → Hamburg
+  { from: '8000096', to: '8000207' }, // Stuttgart → Köln
+  { from: '8000284', to: '8011160' }, // Nürnberg → Berlin
+  { from: '8000105', to: '8000261' }, // Frankfurt → München
 ];
 
 // Suche über journeys() API (sequentiell)
