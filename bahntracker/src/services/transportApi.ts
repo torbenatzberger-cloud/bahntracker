@@ -93,87 +93,57 @@ export async function getTripDetails(tripId: string): Promise<any> {
   }
 }
 
-// Suche über Bahnhofs-Abfahrten (schnell, aber nur für zukünftige Abfahrten)
+// Suche über Bahnhofs-Abfahrten (sequentiell, um API nicht zu überlasten)
 async function searchViaStations(trainNumber: string): Promise<TrainJourney[]> {
   const searchNum = trainNumber.replace(/\D/g, '');
   const searchFull = trainNumber.replace(/\s/g, '').toUpperCase();
 
-  // 20 Große Knotenbahnhöfe für maximale Abdeckung
+  // 6 wichtigste Knotenbahnhöfe - sequentiell abfragen
   const majorStations = [
     '8000105', // Frankfurt Hbf
     '8000261', // München Hbf
     '8011160', // Berlin Hbf
-    '8000152', // Hannover Hbf
     '8000207', // Köln Hbf
-    '8000096', // Stuttgart Hbf
-    '8000284', // Nürnberg Hbf
-    '8010224', // Leipzig Hbf
-    '8000191', // Karlsruhe Hbf
-    '8000050', // Bremen Hbf
     '8000149', // Hamburg Hbf
-    '8000085', // Düsseldorf Hbf
-    '8010101', // Halle (Saale) Hbf
-    '8000128', // Göttingen
-    '8000244', // Mannheim Hbf
-    '8000080', // Dortmund Hbf
-    '8000098', // Essen Hbf
-    '8003200', // Kassel-Wilhelmshöhe
-    '8000263', // Münster Hbf
-    '8000294', // Osnabrück Hbf
+    '8000152', // Hannover Hbf
   ];
 
-  const matchingDepartures: { tripId: string; dep: any }[] = [];
-  const seenTripIds = new Set<string>();
+  console.log(`[Stations] Searching for: "${trainNumber}"`);
 
-  console.log(`[Stations] Searching for: searchNum="${searchNum}", searchFull="${searchFull}"`);
-
-  const allDepartures = await Promise.all(
-    majorStations.map(async (stationId) => {
-      try {
-        return await getDepartures(stationId);
-      } catch (e) {
-        return [];
-      }
-    })
-  );
-
-  for (const departures of allDepartures) {
-    for (const dep of departures) {
-      const lineName = (dep.line?.name || '').toUpperCase();
-      const fahrtNr = String(dep.line?.fahrtNr || '');
-      const lineNameNoSpace = lineName.replace(/\s/g, '');
-      const lineNameParts = lineName.split(/\s+/);
-      const trainNumberInName = lineNameParts[lineNameParts.length - 1];
-
-      const matches =
-        (searchNum && fahrtNr === searchNum) ||
-        (searchNum && trainNumberInName === searchNum) ||
-        (searchFull && lineNameNoSpace === searchFull);
-
-      if (matches && dep.tripId && !seenTripIds.has(dep.tripId)) {
-        console.log(`[Stations] Found: ${lineName}`);
-        seenTripIds.add(dep.tripId);
-        matchingDepartures.push({ tripId: dep.tripId, dep });
-      }
-    }
-    if (matchingDepartures.length >= 1) break;
-  }
-
-  const results: TrainJourney[] = [];
-  for (const { tripId } of matchingDepartures.slice(0, 3)) {
+  // Sequentiell abfragen - bei Fund sofort abbrechen
+  for (const stationId of majorStations) {
     try {
-      const tripDetails = await getTripDetails(tripId);
-      if (tripDetails?.stopovers) {
-        const journey = convertToTrainJourney(tripDetails);
-        if (journey) results.push(journey);
+      const departures = await getDepartures(stationId);
+
+      for (const dep of departures) {
+        const lineName = (dep.line?.name || '').toUpperCase();
+        const fahrtNr = String(dep.line?.fahrtNr || '');
+        const lineNameNoSpace = lineName.replace(/\s/g, '');
+        const lineNameParts = lineName.split(/\s+/);
+        const trainNumberInName = lineNameParts[lineNameParts.length - 1];
+
+        const matches =
+          (searchNum && fahrtNr === searchNum) ||
+          (searchNum && trainNumberInName === searchNum) ||
+          (searchFull && lineNameNoSpace === searchFull);
+
+        if (matches && dep.tripId) {
+          console.log(`[Stations] Found: ${lineName}`);
+
+          // Trip-Details holen und zurückgeben
+          const tripDetails = await getTripDetails(dep.tripId);
+          if (tripDetails?.stopovers) {
+            const journey = convertToTrainJourney(tripDetails);
+            if (journey) return [journey];
+          }
+        }
       }
-      if (results.length >= 1) break;
     } catch (e) {
-      console.warn(`Trip ${tripId} failed:`, e);
+      console.warn(`Station ${stationId} failed:`, e);
     }
   }
 
-  return results;
+  return [];
 }
 
 export async function searchTrainByNumber(trainNumber: string): Promise<TrainJourney[]> {
@@ -272,83 +242,61 @@ export async function getNearbyStations(lat: number, lon: number): Promise<any[]
   return [];
 }
 
-// Bekannte ICE-Strecken für journeys() Suche
+// Bekannte ICE-Strecken für journeys() Suche (reduziert)
 const knownRoutes = [
-  { from: '8000263', to: '8000261' }, // Münster → München (ICE 5xx)
-  { from: '8000207', to: '8000261' }, // Köln → München
-  { from: '8011160', to: '8000261' }, // Berlin → München
-  { from: '8000149', to: '8000261' }, // Hamburg → München
   { from: '8000105', to: '8011160' }, // Frankfurt → Berlin
-  { from: '8000207', to: '8011160' }, // Köln → Berlin
-  { from: '8000149', to: '8011160' }, // Hamburg → Berlin
-  { from: '8000096', to: '8011160' }, // Stuttgart → Berlin
+  { from: '8000207', to: '8000261' }, // Köln → München
+  { from: '8000149', to: '8000261' }, // Hamburg → München
 ];
 
-// Suche über journeys() API
+// Suche über journeys() API (sequentiell)
 async function searchViaJourneys(trainNumber: string): Promise<TrainJourney[]> {
   const searchNum = trainNumber.replace(/\D/g, '');
   const searchFull = trainNumber.replace(/\s/g, '').toUpperCase();
   const baseUrl = getApiBaseUrl();
 
-  console.log('Searching via journeys for:', trainNumber);
+  console.log('[Journeys] Searching for:', trainNumber);
 
-  const results: TrainJourney[] = [];
-  const seenTripIds = new Set<string>();
+  // Sequentiell Routen abfragen - bei Fund sofort abbrechen
+  for (const route of knownRoutes) {
+    try {
+      const url = `${baseUrl}?action=journeys&from=${route.from}&to=${route.to}`;
+      const response = await fetch(url);
+      if (!response.ok) continue;
 
-  // Parallel alle Routen abfragen
-  const routeResults = await Promise.all(
-    knownRoutes.map(async (route) => {
-      try {
-        const url = `${baseUrl}?action=journeys&from=${route.from}&to=${route.to}`;
-        const response = await fetch(url);
-        if (!response.ok) return [];
-        const data = await response.json();
-        return data.journeys || [];
-      } catch (e) {
-        console.warn('Journey route failed:', e);
-        return [];
-      }
-    })
-  );
+      const data = await response.json();
+      const journeys = data.journeys || [];
 
-  // Suche in allen Journeys nach dem Zug
-  for (const journeys of routeResults) {
-    for (const journey of journeys) {
-      for (const leg of journey.legs || []) {
-        if (!leg.line?.name || !leg.tripId) continue;
+      for (const journey of journeys) {
+        for (const leg of journey.legs || []) {
+          if (!leg.line?.name || !leg.tripId) continue;
 
-        const lineName = leg.line.name.toUpperCase();
-        const lineNameNoSpace = lineName.replace(/\s/g, '');
-        const lineNameParts = lineName.split(/\s+/);
-        const trainNumberInName = lineNameParts[lineNameParts.length - 1];
+          const lineName = leg.line.name.toUpperCase();
+          const lineNameNoSpace = lineName.replace(/\s/g, '');
+          const lineNameParts = lineName.split(/\s+/);
+          const trainNumberInName = lineNameParts[lineNameParts.length - 1];
 
-        const matches =
-          (searchNum && trainNumberInName === searchNum) ||
-          (searchFull && lineNameNoSpace === searchFull);
+          const matches =
+            (searchNum && trainNumberInName === searchNum) ||
+            (searchFull && lineNameNoSpace === searchFull);
 
-        if (matches && !seenTripIds.has(leg.tripId)) {
-          console.log('Found via journeys:', lineName);
-          seenTripIds.add(leg.tripId);
+          if (matches) {
+            console.log('[Journeys] Found:', lineName);
 
-          // Hole vollständige Trip-Details
-          try {
             const tripDetails = await getTripDetails(leg.tripId);
             if (tripDetails?.stopovers) {
               const converted = convertToTrainJourney(tripDetails);
-              if (converted) {
-                results.push(converted);
-                if (results.length >= 1) return results;
-              }
+              if (converted) return [converted];
             }
-          } catch (e) {
-            console.warn('Failed to get trip details:', e);
           }
         }
       }
+    } catch (e) {
+      console.warn('Journey route failed:', e);
     }
   }
 
-  return results;
+  return [];
 }
 
 // Fallback: DB trainsearch.exe
