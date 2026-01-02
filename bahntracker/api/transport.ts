@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Wir verwenden v6.db.transport.rest als Proxy (db-vendo-client ist ESM-only und funktioniert nicht in Vercel)
-const API_BASE = 'https://v6.db.transport.rest';
+// Eigener db-vendo-client Server als Backend
+const API_BASE = 'http://152.53.123.81:3000';
 
 // In-Memory Cache
 interface CacheEntry {
@@ -103,16 +103,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const url = new URL(`/stops/${stationId}/departures`, API_BASE);
       url.searchParams.set('duration', '120');
       url.searchParams.set('results', '30');
-      url.searchParams.set('nationalExpress', 'true');
-      url.searchParams.set('national', 'true');
-      url.searchParams.set('regionalExpress', 'true');
-      url.searchParams.set('regional', 'true');
-      url.searchParams.set('suburban', 'false');
-      url.searchParams.set('bus', 'false');
-      url.searchParams.set('ferry', 'false');
-      url.searchParams.set('subway', 'false');
-      url.searchParams.set('tram', 'false');
-      url.searchParams.set('taxi', 'false');
 
       const response = await fetchWithRetry(url.toString());
 
@@ -143,6 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const url = new URL(`/trips/${encodeURIComponent(tripId)}`, API_BASE);
       url.searchParams.set('stopovers', 'true');
+      console.log('Fetching trip:', url.toString());
 
       const response = await fetchWithRetry(url.toString());
 

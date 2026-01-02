@@ -7,11 +7,12 @@ function isWebEnvironment(): boolean {
   return false;
 }
 
-// Eigener db-vendo-client Server
-const OWN_API_BASE = 'http://152.53.123.81:3000';
-
 function getApiBaseUrl(): string {
-  return OWN_API_BASE;
+  if (isWebEnvironment() && typeof window !== 'undefined') {
+    return `${window.location.origin}/api/transport`;
+  }
+  // Für Native Apps: direkt auf Vercel API zeigen
+  return 'https://bahntracker.vercel.app/api/transport';
 }
 
 // Client-Side Cache für Search-Ergebnisse
@@ -70,7 +71,7 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
 
 export async function getDepartures(stationId: string): Promise<any[]> {
   const baseUrl = getApiBaseUrl();
-  const url = `${baseUrl}/stops/${encodeURIComponent(stationId)}/departures?duration=120&results=30`;
+  const url = `${baseUrl}?action=departures&stationId=${encodeURIComponent(stationId)}`;
 
   const response = await fetchWithRetry(url, 3, 1000);
   const data = await response.json();
@@ -79,7 +80,7 @@ export async function getDepartures(stationId: string): Promise<any[]> {
 
 export async function getTripDetails(tripId: string): Promise<any> {
   const baseUrl = getApiBaseUrl();
-  const url = `${baseUrl}/trips/${encodeURIComponent(tripId)}?stopovers=true`;
+  const url = `${baseUrl}?action=trip&tripId=${encodeURIComponent(tripId)}`;
 
   try {
     const response = await fetchWithRetry(url, 2, 500);

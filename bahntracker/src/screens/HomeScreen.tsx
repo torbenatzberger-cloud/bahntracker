@@ -225,6 +225,8 @@ export default function HomeScreen({ navigation }: any) {
             </View>
           </View>
         </Modal>
+        {/* Version */}
+        <Text style={styles.versionText}>v1.1.0</Text>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -470,5 +472,11 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
+  },
+  versionText: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    paddingBottom: spacing.md,
   },
 });
