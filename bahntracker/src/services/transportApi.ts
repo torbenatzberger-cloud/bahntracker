@@ -125,40 +125,49 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
   const matchingDepartures: { tripId: string; dep: any }[] = [];
   const seenTripIds = new Set<string>();
 
-  for (let i = 0; i < majorStations.length; i++) {
-    const stationId = majorStations[i];
-    try {
-      // Pause zwischen Anfragen
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 300));
+  // Alle Bahnhöfe parallel abfragen für Geschwindigkeit
+  console.log(`Searching for: searchNum="${searchNum}", searchFull="${searchFull}"`);
+
+  const allDepartures = await Promise.all(
+    majorStations.map(async (stationId) => {
+      try {
+        return await getDepartures(stationId);
+      } catch (e) {
+        console.warn(`Station ${stationId} failed:`, e);
+        return [];
       }
+    })
+  );
 
-      const departures = await getDepartures(stationId);
-      console.log(`Searching in ${departures.length} departures for: searchNum="${searchNum}", searchFull="${searchFull}"`);
-      departures.forEach((dep: any) => {
-        const lineName = (dep.line?.name || '').toUpperCase();
-        const fahrtNr = String(dep.line?.fahrtNr || '');
-        const lineNameNoSpace = lineName.replace(/\s/g, '');
+  // Durch alle Ergebnisse suchen
+  for (const departures of allDepartures) {
+    for (const dep of departures) {
+      const lineName = (dep.line?.name || '').toUpperCase();
+      const fahrtNr = String(dep.line?.fahrtNr || '');
+      const lineNameNoSpace = lineName.replace(/\s/g, '');
 
-        // Flexibles Matching
-        const matches =
-          (searchNum && fahrtNr === searchNum) ||
-          (searchNum && lineName.includes(searchNum)) ||
-          (searchFull && lineNameNoSpace.includes(searchFull));
+      // Exaktes Matching für Zugnummer
+      // "513" soll "ICE 513" matchen, aber NICHT "ICE 1513"
+      const lineNameParts = lineName.split(/\s+/);
+      const trainNumberInName = lineNameParts[lineNameParts.length - 1]; // Letzte Zahl im Namen
 
-        if (matches && dep.tripId && !seenTripIds.has(dep.tripId)) {
-          console.log(`Found match: ${lineName} (fahrtNr: ${fahrtNr})`);
-          seenTripIds.add(dep.tripId);
-          matchingDepartures.push({ tripId: dep.tripId, dep });
-        }
-      });
+      const matches =
+        // Exakter Match der fahrtNr
+        (searchNum && fahrtNr === searchNum) ||
+        // Exakter Match der Zugnummer im Namen (z.B. "513" in "ICE 513")
+        (searchNum && trainNumberInName === searchNum) ||
+        // Voller Name Match (z.B. "ICE513" oder "ICE 513")
+        (searchFull && lineNameNoSpace === searchFull.toUpperCase());
 
-      // Bei erstem Fund abbrechen
-      if (matchingDepartures.length >= 1) break;
-    } catch (e) {
-      console.warn(`Station ${stationId} failed:`, e);
-      await new Promise(resolve => setTimeout(resolve, 300));
+      if (matches && dep.tripId && !seenTripIds.has(dep.tripId)) {
+        console.log(`Found match: ${lineName} (fahrtNr: ${fahrtNr})`);
+        seenTripIds.add(dep.tripId);
+        matchingDepartures.push({ tripId: dep.tripId, dep });
+      }
     }
+
+    // Bei erstem Fund abbrechen
+    if (matchingDepartures.length >= 1) break;
   }
 
   // Hole Trip-Details
