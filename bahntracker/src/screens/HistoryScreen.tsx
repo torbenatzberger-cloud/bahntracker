@@ -14,6 +14,26 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+
+// Plattformübergreifende Alert-Funktion
+const showDeleteConfirm = (
+  title: string,
+  message: string,
+  onConfirm: () => void
+) => {
+  if (Platform.OS === 'web') {
+    // Web: window.confirm verwenden
+    if (window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    }
+  } else {
+    // iOS/Android: Native Alert
+    Alert.alert(title, message, [
+      { text: 'Abbrechen', style: 'cancel' },
+      { text: 'Löschen', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
 import { useFocusEffect } from '@react-navigation/native';
 import { Trip } from '../types';
 import { getTrips, deleteTrip, updateTrip } from '../services/storage';
@@ -48,27 +68,31 @@ export default function HistoryScreen() {
     setRefreshing(false);
   };
 
-  const handleDelete = (t: Trip) =>
-    Alert.alert('Fahrt löschen?', `${t.trainName}: ${t.originStation} → ${t.destinationStation}`, [
-      { text: 'Abbrechen', style: 'cancel' },
-      {
-        text: 'Löschen',
-        style: 'destructive',
-        onPress: async () => {
-          // Optimistisches Update: Sofort aus UI entfernen
-          setTrips(prev => prev.filter(trip => trip.id !== t.id));
+  const handleDelete = (t: Trip) => {
+    const performDelete = async () => {
+      // Optimistisches Update: Sofort aus UI entfernen
+      setTrips(prev => prev.filter(trip => trip.id !== t.id));
 
-          // Im Hintergrund löschen
-          try {
-            await deleteTrip(t.id);
-          } catch (error) {
-            // Bei Fehler: UI zurücksetzen
-            loadTrips();
-            Alert.alert('Fehler', 'Konnte die Fahrt nicht löschen. Bitte erneut versuchen.');
-          }
-        },
-      },
-    ]);
+      // Im Hintergrund löschen
+      try {
+        await deleteTrip(t.id);
+      } catch (error) {
+        // Bei Fehler: UI zurücksetzen
+        loadTrips();
+        if (Platform.OS === 'web') {
+          window.alert('Konnte die Fahrt nicht löschen. Bitte erneut versuchen.');
+        } else {
+          Alert.alert('Fehler', 'Konnte die Fahrt nicht löschen. Bitte erneut versuchen.');
+        }
+      }
+    };
+
+    showDeleteConfirm(
+      'Fahrt löschen?',
+      `${t.trainName}: ${t.originStation} → ${t.destinationStation}`,
+      performDelete
+    );
+  };
 
   const handleEdit = (trip: Trip) => {
     setEditingTrip(trip);
@@ -169,7 +193,10 @@ export default function HistoryScreen() {
           )}
           <TouchableOpacity
             style={styles.deleteButton}
-            onPress={() => handleDelete(trip)}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleDelete(trip);
+            }}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Text style={styles.deleteButtonText}>×</Text>
