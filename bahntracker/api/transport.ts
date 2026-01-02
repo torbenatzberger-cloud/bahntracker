@@ -152,6 +152,111 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(result);
     }
 
+    // JOURNEYS zwischen zwei Stationen
+    if (action === 'journeys') {
+      const { from, to } = req.query;
+      if (typeof from !== 'string' || typeof to !== 'string') {
+        return res.status(400).json({ error: 'Missing from or to parameter' });
+      }
+
+      const url = new URL('/journeys', API_BASE);
+      url.searchParams.set('from', from);
+      url.searchParams.set('to', to);
+
+      const response = await fetchWithRetry(url.toString());
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          error: `Upstream API error: ${response.status}`,
+        });
+      }
+
+      const data = await response.json();
+      return res.status(200).json({ journeys: data.journeys || data });
+    }
+
+    // TRAINSEARCH Fallback - scrapes DB website
+    if (action === 'trainsearch') {
+      const { trainName } = req.query;
+      if (typeof trainName !== 'string') {
+        return res.status(400).json({ error: 'Missing trainName parameter' });
+      }
+
+      const today = new Date().toLocaleDateString('de-DE', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+      });
+
+      const searchUrl = `https://reiseauskunft.bahn.de/bin/trainsearch.exe/dn?` +
+        `ld=43.02&protocol=https:&seqnr=1&ident=&rt=1&` +
+        `trainname=${encodeURIComponent(trainName)}&date=${encodeURIComponent(today)}&` +
+        `boardType=dep&time=&maxJourneys=10&regularity=&`;
+
+      try {
+        const htmlResponse = await fetch(searchUrl);
+        const html = await htmlResponse.text();
+
+        // Parse HTML für traininfo.exe Links
+        const trainInfoMatches = html.matchAll(/traininfo\.exe\/dn[^"]+/g);
+        const trainLinks: string[] = [];
+
+        for (const match of trainInfoMatches) {
+          const link = `https://reiseauskunft.bahn.de/bin/${match[0].replace(/&amp;/g, '&')}`;
+          if (!trainLinks.includes(link)) {
+            trainLinks.push(link);
+          }
+        }
+
+        if (trainLinks.length === 0) {
+          return res.status(200).json({ trains: [], message: 'No trains found' });
+        }
+
+        // Parse train info for each link
+        const trains: any[] = [];
+        for (const link of trainLinks.slice(0, 3)) {
+          try {
+            const infoResponse = await fetch(link);
+            const infoHtml = await infoResponse.text();
+
+            // Extract train name from title
+            const titleMatch = infoHtml.match(/<title>([^<]+)<\/title>/);
+            const trainName = titleMatch ? titleMatch[1].trim() : 'Unknown';
+
+            // Extract stops from the journey table
+            const stops: any[] = [];
+            const stopMatches = infoHtml.matchAll(
+              /<td[^>]*class="station"[^>]*>([^<]+)<\/td>.*?<td[^>]*class="arrival"[^>]*>([^<]*)<\/td>.*?<td[^>]*class="departure"[^>]*>([^<]*)<\/td>/gs
+            );
+
+            for (const stopMatch of stopMatches) {
+              stops.push({
+                station: { name: stopMatch[1].trim() },
+                arrival: stopMatch[2].trim() || null,
+                departure: stopMatch[3].trim() || null,
+              });
+            }
+
+            trains.push({
+              name: trainName,
+              link,
+              stops,
+            });
+          } catch (e) {
+            console.warn('Failed to parse traininfo:', e);
+          }
+        }
+
+        return res.status(200).json({ trains });
+      } catch (e) {
+        console.error('Trainsearch error:', e);
+        return res.status(500).json({
+          error: 'Trainsearch failed',
+          message: e instanceof Error ? e.message : 'Unknown error',
+        });
+      }
+    }
+
     return res.status(400).json({ error: 'Invalid action or missing parameters' });
   } catch (error) {
     console.error('API error:', error);

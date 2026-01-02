@@ -64,6 +64,37 @@ app.get('/trips/:tripId', async (req, res) => {
   }
 });
 
+// Journeys zwischen zwei Stationen (für Zugsuche)
+app.get('/journeys', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) {
+      return res.status(400).json({ error: 'Missing from or to parameter' });
+    }
+
+    const journeys = await client.journeys(from, to, {
+      results: 10,
+      products: {
+        nationalExpress: true,
+        national: true,
+        regionalExpress: true,
+        regional: true,
+        suburban: false,
+        bus: false,
+        ferry: false,
+        subway: false,
+        tram: false,
+        taxi: false,
+      },
+    });
+
+    res.json({ journeys: journeys.journeys || journeys });
+  } catch (error) {
+    console.error('Journeys error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Locations suchen (optional, für spätere Erweiterungen)
 app.get('/locations', async (req, res) => {
   try {
