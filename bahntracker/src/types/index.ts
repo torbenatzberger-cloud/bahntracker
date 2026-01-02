@@ -27,6 +27,16 @@ export interface TrainJourney {
   destination: TrainStop;
 }
 
+// Vereinfachter Stop für gespeicherte Trips
+export interface TripStop {
+  stationId: string;
+  stationName: string;
+  arrival?: string;
+  departure?: string;
+  arrivalDelay?: number;
+  departureDelay?: number;
+}
+
 export interface Trip {
   id: string;
   tripId: string;
@@ -46,6 +56,11 @@ export interface Trip {
   durationMinutes: number;
   co2SavedKg: number;
   createdAt: string;
+  // Alle Halte für spätere Bearbeitung
+  stops?: TripStop[];
+  // Indizes für gewählte Start/Ziel-Haltestellen
+  originStopIndex?: number;
+  destinationStopIndex?: number;
 }
 
 export interface MonthlyStats {

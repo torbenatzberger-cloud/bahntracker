@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { TrainJourney, Trip } from '../types';
+import { TrainJourney, Trip, TripStop } from '../types';
 import { calculateRailDistance, calculateDuration } from '../services/distanceApi';
 import { calculateCo2Saved } from '../utils/co2';
 import { saveTrip } from '../services/storage';
@@ -107,10 +107,21 @@ export default function TripDetailScreen({ route, navigation }: any) {
   }, [originIndex, destinationIndex, journey.stops, calculatedDistance]);
 
   const handleSaveTrip = async () => {
-    if (!tripDetails) return;
+    if (!tripDetails || originIndex === null || destinationIndex === null) return;
     setSaving(true);
     try {
       const co2 = calculateCo2Saved(tripDetails.distanceKm);
+
+      // Alle Stops für spätere Bearbeitung speichern
+      const stops: TripStop[] = journey.stops.map((s) => ({
+        stationId: s.station.id,
+        stationName: s.station.name,
+        arrival: s.arrival || s.plannedArrival,
+        departure: s.departure || s.plannedDeparture,
+        arrivalDelay: s.arrivalDelay,
+        departureDelay: s.departureDelay,
+      }));
+
       const trip: Trip = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         tripId: journey.tripId,
@@ -130,6 +141,9 @@ export default function TripDetailScreen({ route, navigation }: any) {
         durationMinutes: tripDetails.durationMinutes,
         co2SavedKg: co2,
         createdAt: new Date().toISOString(),
+        stops,
+        originStopIndex: originIndex,
+        destinationStopIndex: destinationIndex,
       };
       await saveTrip(trip);
       Alert.alert('Gespeichert!', `${tripDetails.distanceKm} km • ${co2.toFixed(1)} kg CO₂ gespart`, [

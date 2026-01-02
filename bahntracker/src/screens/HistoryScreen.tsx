@@ -9,15 +9,23 @@ import {
   RefreshControl,
   Platform,
   Alert,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Trip } from '../types';
-import { getTrips, deleteTrip } from '../services/storage';
-import { colors, spacing, borderRadius, typography, getTrainTypeColor, getDelayColor } from '../theme';
+import { Trip, TripStop } from '../types';
+import { getTrips, deleteTrip, updateTrip } from '../services/storage';
+import { calculateDuration } from '../services/distanceApi';
+import { calculateCo2Saved } from '../utils/co2';
+import { colors, spacing, borderRadius, typography, getTrainTypeColor, getDelayColor, modalStyle } from '../theme';
 
 export default function HistoryScreen() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
+  const [selectedOriginIndex, setSelectedOriginIndex] = useState<number>(0);
+  const [selectedDestinationIndex, setSelectedDestinationIndex] = useState<number>(0);
 
   const loadTrips = useCallback(async () => {
     setTrips(await getTrips());
@@ -54,6 +62,81 @@ export default function HistoryScreen() {
     }
   };
 
+  const handleEdit = (trip: Trip) => {
+    if (!trip.stops || trip.stops.length < 2) {
+      // Alte Trips ohne Stops können nicht bearbeitet werden
+      if (Platform.OS === 'web') {
+        window.alert('Diese Fahrt kann nicht bearbeitet werden (ältere Version ohne Haltestellen-Daten).');
+      } else {
+        Alert.alert('Hinweis', 'Diese Fahrt kann nicht bearbeitet werden (ältere Version ohne Haltestellen-Daten).');
+      }
+      return;
+    }
+    setEditingTrip(trip);
+    setSelectedOriginIndex(trip.originStopIndex ?? 0);
+    setSelectedDestinationIndex(trip.destinationStopIndex ?? trip.stops.length - 1);
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingTrip || !editingTrip.stops) return;
+
+    const stops = editingTrip.stops;
+    const origin = stops[selectedOriginIndex];
+    const destination = stops[selectedDestinationIndex];
+
+    // Dauer berechnen
+    const dep = origin.departure || '';
+    const arr = destination.arrival || '';
+    const durationMinutes = dep && arr ? calculateDuration(dep, arr) : editingTrip.durationMinutes;
+
+    // Verspätung berechnen (max aus Abfahrt und Ankunft)
+    const delayMinutes = Math.round(
+      Math.max(destination.arrivalDelay || 0, origin.departureDelay || 0) / 60
+    );
+
+    // Distanz: Wir können sie nicht neu berechnen ohne Koordinaten,
+    // daher proportional zur Anzahl der Stops schätzen
+    const originalStopCount = (editingTrip.destinationStopIndex ?? stops.length - 1) - (editingTrip.originStopIndex ?? 0);
+    const newStopCount = selectedDestinationIndex - selectedOriginIndex;
+    const distanceKm = originalStopCount > 0
+      ? Math.round(editingTrip.distanceKm * (newStopCount / originalStopCount))
+      : editingTrip.distanceKm;
+
+    const co2SavedKg = calculateCo2Saved(distanceKm);
+
+    const updatedTrip: Trip = {
+      ...editingTrip,
+      originStation: origin.stationName,
+      originStationId: origin.stationId,
+      destinationStation: destination.stationName,
+      destinationStationId: destination.stationId,
+      departurePlanned: origin.departure || editingTrip.departurePlanned,
+      departureActual: origin.departure,
+      arrivalPlanned: destination.arrival || editingTrip.arrivalPlanned,
+      arrivalActual: destination.arrival,
+      delayMinutes,
+      distanceKm,
+      durationMinutes,
+      co2SavedKg,
+      originStopIndex: selectedOriginIndex,
+      destinationStopIndex: selectedDestinationIndex,
+    };
+
+    try {
+      await updateTrip(updatedTrip);
+      setEditModalVisible(false);
+      setEditingTrip(null);
+      loadTrips();
+    } catch (error) {
+      if (Platform.OS === 'web') {
+        window.alert('Konnte Fahrt nicht speichern');
+      } else {
+        Alert.alert('Fehler', 'Konnte Fahrt nicht speichern');
+      }
+    }
+  };
+
   const formatDate = (d: string) =>
     new Date(d).toLocaleDateString('de-DE', {
       weekday: 'short',
@@ -84,7 +167,12 @@ export default function HistoryScreen() {
   }));
 
   const renderTripCard = (trip: Trip) => (
-    <View key={trip.id} style={styles.tripCard}>
+    <TouchableOpacity
+      key={trip.id}
+      style={styles.tripCard}
+      onPress={() => handleEdit(trip)}
+      activeOpacity={0.7}
+    >
       <View style={styles.tripHeader}>
         <View style={styles.trainInfo}>
           <View style={[styles.trainBadge, { backgroundColor: getTrainTypeColor(trip.trainType) }]}>
@@ -102,7 +190,10 @@ export default function HistoryScreen() {
           )}
           <TouchableOpacity
             style={styles.deleteButton}
-            onPress={() => handleDelete(trip)}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleDelete(trip);
+            }}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Text style={styles.deleteButtonText}>×</Text>
@@ -146,7 +237,11 @@ export default function HistoryScreen() {
           <Text style={styles.statLabel}>kg CO₂</Text>
         </View>
       </View>
-    </View>
+
+      {trip.stops && trip.stops.length > 0 && (
+        <Text style={styles.editHint}>Tippen zum Bearbeiten</Text>
+      )}
+    </TouchableOpacity>
   );
 
   const renderSection = ({ item: section }: { item: typeof sections[0] }) => (
@@ -164,6 +259,173 @@ export default function HistoryScreen() {
       {section.data.map(renderTripCard)}
     </View>
   );
+
+  const renderEditModal = () => {
+    if (!editingTrip || !editingTrip.stops) return null;
+
+    const stops = editingTrip.stops;
+    const canSave = selectedDestinationIndex > selectedOriginIndex;
+
+    // Vorschau der Berechnung
+    const origin = stops[selectedOriginIndex];
+    const destination = stops[selectedDestinationIndex];
+    const dep = origin?.departure || '';
+    const arr = destination?.arrival || '';
+    const previewDuration = dep && arr ? calculateDuration(dep, arr) : 0;
+
+    const originalStopCount = (editingTrip.destinationStopIndex ?? stops.length - 1) - (editingTrip.originStopIndex ?? 0);
+    const newStopCount = selectedDestinationIndex - selectedOriginIndex;
+    const previewDistance = originalStopCount > 0
+      ? Math.round(editingTrip.distanceKm * (newStopCount / originalStopCount))
+      : 0;
+    const previewCo2 = calculateCo2Saved(previewDistance);
+
+    return (
+      <Modal
+        visible={editModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Fahrt bearbeiten</Text>
+              <TouchableOpacity
+                onPress={() => setEditModalVisible(false)}
+                style={styles.modalCloseButton}
+              >
+                <Text style={styles.modalCloseText}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.trainInfoModal}>
+              <View style={[styles.trainBadge, { backgroundColor: getTrainTypeColor(editingTrip.trainType) }]}>
+                <Text style={styles.trainBadgeText}>{editingTrip.trainType}</Text>
+              </View>
+              <Text style={styles.trainNameModal}>{editingTrip.trainName}</Text>
+            </View>
+
+            <Text style={styles.sectionLabel}>HALTESTELLEN AUSWÄHLEN</Text>
+
+            <ScrollView style={styles.stopsContainer} showsVerticalScrollIndicator={false}>
+              {stops.map((stop, index) => {
+                const isOrigin = index === selectedOriginIndex;
+                const isDestination = index === selectedDestinationIndex;
+                const isBetween = index > selectedOriginIndex && index < selectedDestinationIndex;
+
+                return (
+                  <TouchableOpacity
+                    key={`${stop.stationId}-${index}`}
+                    style={[
+                      styles.stopItem,
+                      isOrigin && styles.stopItemOrigin,
+                      isDestination && styles.stopItemDestination,
+                      isBetween && styles.stopItemBetween,
+                    ]}
+                    onPress={() => {
+                      if (selectedOriginIndex === index) {
+                        // Bereits Origin - nichts tun
+                      } else if (selectedDestinationIndex === index) {
+                        // Bereits Destination - nichts tun
+                      } else if (index < selectedOriginIndex) {
+                        // Vor Origin - wird neuer Origin
+                        setSelectedOriginIndex(index);
+                      } else if (index > selectedDestinationIndex) {
+                        // Nach Destination - wird neue Destination
+                        setSelectedDestinationIndex(index);
+                      } else {
+                        // Zwischen Origin und Destination - auswählen was näher ist
+                        const distToOrigin = index - selectedOriginIndex;
+                        const distToDest = selectedDestinationIndex - index;
+                        if (distToOrigin <= distToDest) {
+                          setSelectedOriginIndex(index);
+                        } else {
+                          setSelectedDestinationIndex(index);
+                        }
+                      }
+                    }}
+                  >
+                    <View style={styles.stopTimeline}>
+                      <View
+                        style={[
+                          styles.stopDot,
+                          isOrigin && styles.stopDotOrigin,
+                          isDestination && styles.stopDotDestination,
+                          isBetween && styles.stopDotBetween,
+                        ]}
+                      />
+                      {index < stops.length - 1 && (
+                        <View
+                          style={[
+                            styles.stopLine,
+                            (isOrigin || isBetween) && styles.stopLineActive,
+                          ]}
+                        />
+                      )}
+                    </View>
+                    <View style={styles.stopInfo}>
+                      <Text style={[
+                        styles.stopName,
+                        (isOrigin || isDestination) && styles.stopNameSelected,
+                      ]}>
+                        {stop.stationName}
+                      </Text>
+                      <View style={styles.stopTimes}>
+                        {stop.arrival && (
+                          <Text style={styles.stopTime}>an {formatTime(stop.arrival)}</Text>
+                        )}
+                        {stop.departure && (
+                          <Text style={styles.stopTime}>ab {formatTime(stop.departure)}</Text>
+                        )}
+                      </View>
+                    </View>
+                    {isOrigin && <View style={styles.labelBadgeOrigin}><Text style={styles.labelBadgeText}>START</Text></View>}
+                    {isDestination && <View style={styles.labelBadgeDestination}><Text style={styles.labelBadgeText}>ZIEL</Text></View>}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {canSave && (
+              <View style={styles.previewContainer}>
+                <View style={styles.previewStat}>
+                  <Text style={styles.previewValue}>{previewDistance}</Text>
+                  <Text style={styles.previewLabel}>km</Text>
+                </View>
+                <View style={styles.previewDivider} />
+                <View style={styles.previewStat}>
+                  <Text style={styles.previewValue}>{previewDuration}</Text>
+                  <Text style={styles.previewLabel}>min</Text>
+                </View>
+                <View style={styles.previewDivider} />
+                <View style={styles.previewStat}>
+                  <Text style={[styles.previewValue, styles.previewValueGreen]}>{previewCo2.toFixed(1)}</Text>
+                  <Text style={styles.previewLabel}>kg CO₂</Text>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setEditModalVisible(false)}
+              >
+                <Text style={styles.cancelButtonText}>Abbrechen</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
+                onPress={handleSaveEdit}
+                disabled={!canSave}
+              >
+                <Text style={styles.saveButtonText}>Speichern</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
 
   if (trips.length === 0) {
     return (
@@ -206,6 +468,8 @@ export default function HistoryScreen() {
           />
         }
       />
+
+      {renderEditModal()}
     </SafeAreaView>
   );
 }
@@ -413,6 +677,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border.default,
     marginHorizontal: spacing.lg,
   },
+  editHint: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
@@ -442,5 +712,218 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: modalStyle.overlay.backgroundColor,
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: modalStyle.content.backgroundColor,
+    borderTopLeftRadius: modalStyle.content.borderTopLeftRadius,
+    borderTopRightRadius: modalStyle.content.borderTopRightRadius,
+    paddingTop: modalStyle.content.paddingTop,
+    paddingBottom: 40,
+    maxHeight: '85%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    ...typography.header,
+    fontSize: 22,
+    color: colors.text.primary,
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.background.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    fontSize: 24,
+    color: colors.text.secondary,
+    fontWeight: '300',
+    marginTop: -2,
+  },
+  trainInfoModal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.lg,
+  },
+  trainNameModal: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  sectionLabel: {
+    ...typography.label,
+    color: colors.text.secondary,
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.sm,
+  },
+  stopsContainer: {
+    maxHeight: 300,
+    paddingHorizontal: spacing.xl,
+  },
+  stopItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginHorizontal: -spacing.md,
+    borderRadius: borderRadius.md,
+  },
+  stopItemOrigin: {
+    backgroundColor: 'rgba(63, 185, 80, 0.15)',
+  },
+  stopItemDestination: {
+    backgroundColor: 'rgba(248, 81, 73, 0.15)',
+  },
+  stopItemBetween: {
+    backgroundColor: 'rgba(88, 166, 255, 0.1)',
+  },
+  stopTimeline: {
+    alignItems: 'center',
+    width: 20,
+    marginRight: spacing.md,
+  },
+  stopDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.text.disabled,
+    borderWidth: 2,
+    borderColor: colors.background.secondary,
+  },
+  stopDotOrigin: {
+    backgroundColor: colors.accent.green,
+    borderColor: 'rgba(63, 185, 80, 0.3)',
+  },
+  stopDotDestination: {
+    backgroundColor: colors.accent.red,
+    borderColor: 'rgba(248, 81, 73, 0.3)',
+  },
+  stopDotBetween: {
+    backgroundColor: colors.accent.blue,
+    borderColor: 'rgba(88, 166, 255, 0.3)',
+  },
+  stopLine: {
+    width: 2,
+    height: 28,
+    backgroundColor: colors.border.default,
+    marginTop: spacing.xs,
+  },
+  stopLineActive: {
+    backgroundColor: colors.accent.blue,
+  },
+  stopInfo: {
+    flex: 1,
+  },
+  stopName: {
+    fontSize: 15,
+    color: colors.text.primary,
+    fontWeight: '500',
+  },
+  stopNameSelected: {
+    fontWeight: '700',
+  },
+  stopTimes: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: 2,
+  },
+  stopTime: {
+    fontSize: 12,
+    color: colors.text.secondary,
+  },
+  labelBadgeOrigin: {
+    backgroundColor: colors.accent.green,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: borderRadius.sm,
+  },
+  labelBadgeDestination: {
+    backgroundColor: colors.accent.red,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: borderRadius.sm,
+  },
+  labelBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  previewContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: colors.background.primary,
+    marginHorizontal: spacing.xl,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+  },
+  previewStat: {
+    alignItems: 'center',
+  },
+  previewValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  previewValueGreen: {
+    color: colors.accent.green,
+  },
+  previewLabel: {
+    fontSize: 11,
+    color: colors.text.tertiary,
+    marginTop: 2,
+  },
+  previewDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: colors.border.default,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
+    gap: spacing.md,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  saveButton: {
+    flex: 1,
+    backgroundColor: colors.accent.green,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
+    alignItems: 'center',
+  },
+  saveButtonDisabled: {
+    backgroundColor: colors.background.tertiary,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
