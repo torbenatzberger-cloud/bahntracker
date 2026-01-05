@@ -161,6 +161,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(result);
     }
 
+    // TRAIN SEARCH über Index (SCHNELL!)
+    if (action === 'trainindex') {
+      const { q } = req.query;
+      if (typeof q !== 'string') {
+        return res.status(400).json({ error: 'Missing q (query) parameter' });
+      }
+
+      const url = new URL('/trains/search', API_BASE);
+      url.searchParams.set('q', q);
+
+      const response = await fetchWithRetry(url.toString());
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          error: `Upstream API error: ${response.status}`,
+        });
+      }
+
+      const data = await response.json();
+      return res.status(200).json(data);
+    }
+
+    // INDEX STATUS
+    if (action === 'indexstatus') {
+      const url = new URL('/trains/index-status', API_BASE);
+      const response = await fetchWithRetry(url.toString());
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          error: `Upstream API error: ${response.status}`,
+        });
+      }
+
+      const data = await response.json();
+      return res.status(200).json(data);
+    }
+
     // JOURNEYS zwischen zwei Stationen
     if (action === 'journeys') {
       const { from, to } = req.query;

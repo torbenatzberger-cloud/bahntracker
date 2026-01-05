@@ -210,6 +210,31 @@ async function searchViaStations(trainNumber: string): Promise<TrainJourney[]> {
   return [];
 }
 
+// Schnelle Index-Suche über Backend
+async function searchViaIndex(trainNumber: string): Promise<TrainJourney[]> {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}?action=trainindex&q=${encodeURIComponent(trainNumber)}`;
+
+  console.log('[Index] Searching via train index...');
+
+  try {
+    const response = await fetchWithRetry(url, 2, 500);
+    const data = await response.json();
+
+    if (data.found && data.trip) {
+      console.log(`[Index] Found: ${data.train.lineName}`);
+      const journey = convertToTrainJourney(data.trip);
+      if (journey) return [journey];
+    }
+
+    console.log('[Index] Not found in index');
+    return [];
+  } catch (e) {
+    console.warn('[Index] Index search failed:', e);
+    return [];
+  }
+}
+
 export async function searchTrainByNumber(trainNumber: string): Promise<TrainJourney[]> {
   const cleanedNumber = trainNumber.trim().toUpperCase();
   if (!cleanedNumber) return [];
@@ -221,50 +246,35 @@ export async function searchTrainByNumber(trainNumber: string): Promise<TrainJou
     return cached;
   }
 
-  console.log('=== HYBRID SEARCH START ===');
+  console.log('=== SMART SEARCH START ===');
   console.log('Searching for:', cleanedNumber);
 
-  // STUFE 1: Schnelle Suche über Bahnhofs-Abfahrten
-  console.log('[1/3] Trying station departures...');
-  let results = await searchViaStations(cleanedNumber);
+  // STUFE 1: Schnelle Index-Suche (nur 1 API-Call!)
+  console.log('[1/3] Trying train index (fast)...');
+  let results = await searchViaIndex(cleanedNumber);
+  if (results.length > 0) {
+    console.log('Found via index!');
+    setCachedSearch(cleanedNumber, results);
+    return results;
+  }
+
+  // STUFE 2: Fallback auf Station-Suche (wenn Index noch nicht bereit)
+  console.log('[2/3] Trying station departures (fallback)...');
+  results = await searchViaStations(cleanedNumber);
   if (results.length > 0) {
     console.log('Found via stations!');
     setCachedSearch(cleanedNumber, results);
     return results;
   }
 
-  // STUFE 2: Suche über journeys() API
-  console.log('[2/3] Trying journeys API...');
+  // STUFE 3: Journeys API als letzter Versuch
+  console.log('[3/3] Trying journeys API...');
   results = await searchViaJourneys(cleanedNumber);
   if (results.length > 0) {
     console.log('Found via journeys!');
     setCachedSearch(cleanedNumber, results);
     return results;
   }
-
-  // STUFE 2b: Bei reinen Zahlen auch mit Präfixen versuchen
-  const isNumericOnly = /^\d+$/.test(cleanedNumber);
-  if (isNumericOnly) {
-    console.log('[2b] Trying with train type prefixes...');
-    for (const prefix of ['ICE', 'IC', 'EC', 'RE', 'RB']) {
-      const withPrefix = `${prefix} ${cleanedNumber}`;
-      results = await searchViaStations(withPrefix);
-      if (results.length > 0) {
-        console.log(`Found via stations with prefix ${prefix}!`);
-        setCachedSearch(cleanedNumber, results);
-        return results;
-      }
-    }
-  }
-
-  // STUFE 3: Fallback zu trainsearch.exe (deaktiviert - DB blockiert Vercel)
-  // console.log('[3/3] Trying trainsearch.exe fallback...');
-  // results = await searchViaTrainsearch(cleanedNumber);
-  // if (results.length > 0) {
-  //   console.log('Found via trainsearch!');
-  //   setCachedSearch(cleanedNumber, results);
-  //   return results;
-  // }
 
   console.log('=== NO RESULTS FOUND ===');
   return [];
