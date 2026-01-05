@@ -92,7 +92,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // DEPARTURES
     if (action === 'departures' && typeof stationId === 'string') {
-      const cacheKey = getCacheKey('departures', stationId);
+      const whenParam = req.query.when as string | undefined;
+      const durationParam = req.query.duration as string | undefined;
+
+      // Cache-Key mit when-Parameter für zeitbasierte Suchen
+      const cacheKey = getCacheKey('departures', `${stationId}:${whenParam || 'now'}:${durationParam || '720'}`);
       const cached = getFromCache(cacheKey);
 
       if (cached) {
@@ -101,8 +105,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const url = new URL(`/stops/${stationId}/departures`, API_BASE);
-      url.searchParams.set('duration', '720'); // 12 Stunden
+      url.searchParams.set('duration', durationParam || '720'); // 12 Stunden default
       url.searchParams.set('results', '100');
+
+      // when-Parameter für Suche ab bestimmtem Zeitpunkt
+      if (whenParam) {
+        url.searchParams.set('when', whenParam);
+      }
 
       const response = await fetchWithRetry(url.toString());
 

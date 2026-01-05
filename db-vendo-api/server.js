@@ -24,8 +24,10 @@ app.get('/stops/:stopId/departures', async (req, res) => {
     const { stopId } = req.params;
     const duration = parseInt(req.query.duration) || 120;
     const results = parseInt(req.query.results) || 30;
+    const when = req.query.when ? new Date(req.query.when) : undefined;
 
     const departures = await client.departures(stopId, {
+      when,
       duration,
       results,
       products: {

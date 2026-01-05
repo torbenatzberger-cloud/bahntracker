@@ -69,15 +69,50 @@ async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<R
   throw new Error('Max retries reached');
 }
 
-export async function getDepartures(stationId: string): Promise<any[]> {
+export async function getDepartures(
+  stationId: string,
+  when?: string,
+  duration?: number
+): Promise<any[]> {
   const baseUrl = getApiBaseUrl();
-  const url = `${baseUrl}?action=departures&stationId=${encodeURIComponent(stationId)}`;
+  let url = `${baseUrl}?action=departures&stationId=${encodeURIComponent(stationId)}`;
+
+  if (when) {
+    url += `&when=${encodeURIComponent(when)}`;
+  }
+  if (duration) {
+    url += `&duration=${duration}`;
+  }
+
   console.log('Fetching departures from:', url);
 
   const response = await fetchWithRetry(url, 3, 1000);
   const data = await response.json();
   console.log('Got departures:', data.departures?.length || 0);
   return data.departures || [];
+}
+
+// Ganztages-Abfahrten: Morgen (00:00-12:00) + Nachmittag (12:00-24:00)
+async function getDeparturesForToday(stationId: string): Promise<any[]> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Morgen-Block: 00:00 - 12:00
+  const morningDeps = await getDepartures(stationId, today.toISOString(), 720);
+
+  // Nachmittag-Block: 12:00 - 24:00
+  const noon = new Date(today);
+  noon.setHours(12, 0, 0, 0);
+  const afternoonDeps = await getDepartures(stationId, noon.toISOString(), 720);
+
+  // Kombinieren und Duplikate entfernen (basierend auf tripId)
+  const allDeps = [...morningDeps, ...afternoonDeps];
+  const seen = new Set<string>();
+  return allDeps.filter(dep => {
+    if (!dep.tripId || seen.has(dep.tripId)) return false;
+    seen.add(dep.tripId);
+    return true;
+  });
 }
 
 export async function getTripDetails(tripId: string): Promise<any> {
@@ -136,12 +171,13 @@ async function searchViaStations(trainNumber: string): Promise<TrainJourney[]> {
     '8000078', // Darmstadt Hbf
   ];
 
-  console.log(`[Stations] Searching for: "${trainNumber}"`);
+  console.log(`[Stations] Searching for: "${trainNumber}" (full day)`);
 
   // Sequentiell abfragen - bei Fund sofort abbrechen
   for (const stationId of majorStations) {
     try {
-      const departures = await getDepartures(stationId);
+      // Ganztages-Suche: ab 00:00 Uhr bis 24:00 Uhr
+      const departures = await getDeparturesForToday(stationId);
 
       for (const dep of departures) {
         const lineName = (dep.line?.name || '').toUpperCase();
