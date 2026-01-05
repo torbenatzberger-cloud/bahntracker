@@ -74,11 +74,20 @@ async function buildTrainIndex() {
   const startTime = Date.now();
 
   const newIndex = new Map();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
 
-  const noon = new Date(today);
-  noon.setHours(12, 0, 0, 0);
+  // Explizit heute 00:00 Uhr in deutscher Zeit (UTC+1)
+  const now = new Date();
+  const today = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    0, 0, 0, 0  // 00:00 UTC (= 01:00 deutscher Zeit, close enough)
+  ));
+
+  const noon = new Date(today.getTime() + 12 * 60 * 60 * 1000); // +12 hours
+
+  console.log(`[Index] Today start: ${today.toISOString()}`);
+  console.log(`[Index] Noon: ${noon.toISOString()}`);
 
   let totalTrains = 0;
   let stationsProcessed = 0;
@@ -123,10 +132,11 @@ async function buildTrainIndex() {
         },
       });
 
-      const allDeps = [
-        ...(morningDeps.departures || morningDeps || []),
-        ...(afternoonDeps.departures || afternoonDeps || []),
-      ];
+      const morningList = morningDeps.departures || morningDeps || [];
+      const afternoonList = afternoonDeps.departures || afternoonDeps || [];
+      const allDeps = [...morningList, ...afternoonList];
+
+      console.log(`[Index] ${station.name}: ${morningList.length} morning + ${afternoonList.length} afternoon = ${allDeps.length} total`);
 
       for (const dep of allDeps) {
         if (!dep.line?.name || !dep.tripId) continue;
