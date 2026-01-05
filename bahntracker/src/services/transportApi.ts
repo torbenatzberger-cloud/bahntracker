@@ -140,7 +140,7 @@ async function searchViaStations(trainNumber: string): Promise<TrainJourney[]> {
     '8000261', // München Hbf
     '8011160', // Berlin Hbf
     '8000207', // Köln Hbf
-    '8000149', // Hamburg Hbf
+    '8002549', // Hamburg Hbf
     '8000152', // Hannover Hbf
     // Tier 2: Wichtige Fernverkehrsknoten
     '8000096', // Stuttgart Hbf
