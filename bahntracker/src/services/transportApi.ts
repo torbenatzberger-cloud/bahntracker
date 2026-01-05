@@ -148,12 +148,12 @@ async function searchViaStations(trainNumber: string): Promise<TrainJourney[]> {
         const fahrtNr = String(dep.line?.fahrtNr || '');
         const lineNameNoSpace = lineName.replace(/\s/g, '');
         const lineNameParts = lineName.split(/\s+/);
-        const trainNumberInName = lineNameParts[lineNameParts.length - 1];
+        const containsTrainNumber = searchNum && lineNameParts.some(part => part === searchNum);
 
         const matches =
           (searchNum && fahrtNr === searchNum) ||
-          (searchNum && trainNumberInName === searchNum) ||
-          (searchFull && lineNameNoSpace === searchFull);
+          containsTrainNumber ||
+          (searchFull && lineNameNoSpace.includes(searchFull));
 
         if (matches && dep.tripId) {
           console.log(`[Stations] Found: ${lineName}`);
@@ -317,11 +317,11 @@ async function searchViaJourneys(trainNumber: string): Promise<TrainJourney[]> {
           const lineName = leg.line.name.toUpperCase();
           const lineNameNoSpace = lineName.replace(/\s/g, '');
           const lineNameParts = lineName.split(/\s+/);
-          const trainNumberInName = lineNameParts[lineNameParts.length - 1];
+          const containsTrainNumber = searchNum && lineNameParts.some(part => part === searchNum);
 
           const matches =
-            (searchNum && trainNumberInName === searchNum) ||
-            (searchFull && lineNameNoSpace === searchFull);
+            containsTrainNumber ||
+            (searchFull && lineNameNoSpace.includes(searchFull));
 
           if (matches) {
             console.log('[Journeys] Found:', lineName);
