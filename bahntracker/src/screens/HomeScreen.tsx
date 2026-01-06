@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   ScrollView,
   Modal,
 } from 'react-native';
-import { searchTrainByNumber } from '../services/transportApi';
+import { searchTrainByNumber, getAutocomplete, AutocompleteResult } from '../services/transportApi';
 import { TrainJourney } from '../types';
 import { colors, spacing, borderRadius, typography, getTrainTypeColor, modalStyle } from '../theme';
 
@@ -22,6 +22,69 @@ export default function HomeScreen({ navigation }: any) {
   const [error, setError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<TrainJourney[]>([]);
   const [showResultsModal, setShowResultsModal] = useState(false);
+
+  // Autocomplete State
+  const [autocompleteResults, setAutocompleteResults] = useState<AutocompleteResult[]>([]);
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const autocompleteTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounced Autocomplete
+  const handleTrainNumberChange = useCallback((text: string) => {
+    setTrainNumber(text);
+    setError(null);
+
+    // Clear previous timeout
+    if (autocompleteTimeout.current) {
+      clearTimeout(autocompleteTimeout.current);
+    }
+
+    // Only search if at least 1 character
+    if (text.trim().length >= 1) {
+      autocompleteTimeout.current = setTimeout(async () => {
+        const results = await getAutocomplete(text.trim());
+        setAutocompleteResults(results);
+        setShowAutocomplete(results.length > 0);
+      }, 150); // 150ms debounce
+    } else {
+      setAutocompleteResults([]);
+      setShowAutocomplete(false);
+    }
+  }, []);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autocompleteTimeout.current) {
+        clearTimeout(autocompleteTimeout.current);
+      }
+    };
+  }, []);
+
+  // Handle autocomplete selection
+  const handleAutocompleteSelect = async (result: AutocompleteResult) => {
+    setShowAutocomplete(false);
+    setAutocompleteResults([]);
+    setTrainNumber(result.lineName);
+    setLoading(true);
+    setError(null);
+
+    try {
+      const results = await searchTrainByNumber(result.trainNumber);
+      if (results.length === 1) {
+        navigation.navigate('TripDetail', { journey: results[0] });
+        setTrainNumber('');
+      } else if (results.length > 1) {
+        setSearchResults(results);
+        setShowResultsModal(true);
+      } else {
+        setError(`Zug "${result.lineName}" nicht gefunden.`);
+      }
+    } catch (e: any) {
+      setError('Suche fehlgeschlagen.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSearch = async () => {
     const query = trainNumber.trim();
@@ -104,21 +167,68 @@ export default function HomeScreen({ navigation }: any) {
         <View style={styles.searchSection}>
           <Text style={styles.inputLabel}>ZUG SUCHEN</Text>
           <View style={styles.searchRow}>
-            <TextInput
-              style={styles.input}
-              value={trainNumber}
-              onChangeText={setTrainNumber}
-              onSubmitEditing={handleSearch}
-              placeholder="ICE 513, RE 1, RB 789..."
-              placeholderTextColor={colors.text.tertiary}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              returnKeyType="search"
-              editable={!loading}
-            />
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.input}
+                value={trainNumber}
+                onChangeText={handleTrainNumberChange}
+                onSubmitEditing={() => {
+                  setShowAutocomplete(false);
+                  handleSearch();
+                }}
+                onFocus={() => {
+                  if (autocompleteResults.length > 0) {
+                    setShowAutocomplete(true);
+                  }
+                }}
+                placeholder="ICE 513, RE 1, RB 789..."
+                placeholderTextColor={colors.text.tertiary}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                returnKeyType="search"
+                editable={!loading}
+              />
+
+              {/* Autocomplete Dropdown */}
+              {showAutocomplete && autocompleteResults.length > 0 && (
+                <View style={styles.autocompleteDropdown}>
+                  <ScrollView
+                    style={styles.autocompleteScroll}
+                    keyboardShouldPersistTaps="handled"
+                    nestedScrollEnabled
+                  >
+                    {autocompleteResults.map((result, index) => (
+                      <TouchableOpacity
+                        key={`${result.trainNumber}-${index}`}
+                        style={[
+                          styles.autocompleteItem,
+                          index === autocompleteResults.length - 1 && styles.autocompleteItemLast,
+                        ]}
+                        onPress={() => handleAutocompleteSelect(result)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.autocompleteBadge, { backgroundColor: getTrainTypeColor(result.trainType) }]}>
+                          <Text style={styles.autocompleteBadgeText}>{result.trainType}</Text>
+                        </View>
+                        <View style={styles.autocompleteContent}>
+                          <Text style={styles.autocompleteLineName}>{result.lineName}</Text>
+                          <Text style={styles.autocompleteDirection} numberOfLines={1}>
+                            → {result.direction}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+
             <TouchableOpacity
               style={[styles.searchButton, loading && styles.searchButtonDisabled]}
-              onPress={handleSearch}
+              onPress={() => {
+                setShowAutocomplete(false);
+                handleSearch();
+              }}
               disabled={loading || !trainNumber.trim()}
               activeOpacity={0.7}
             >
@@ -268,8 +378,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
   },
-  input: {
+  inputContainer: {
     flex: 1,
+    position: 'relative',
+    zIndex: 10,
+  },
+  input: {
     height: 56,
     backgroundColor: colors.background.tertiary,
     borderRadius: borderRadius.lg,
@@ -279,6 +393,64 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     borderWidth: 1,
     borderColor: colors.border.default,
+  },
+  // Autocomplete Styles
+  autocompleteDropdown: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.background.secondary,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    maxHeight: 250,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    zIndex: 100,
+  },
+  autocompleteScroll: {
+    maxHeight: 250,
+  },
+  autocompleteItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+  },
+  autocompleteItemLast: {
+    borderBottomWidth: 0,
+  },
+  autocompleteBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.sm,
+    marginRight: spacing.md,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  autocompleteBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  autocompleteContent: {
+    flex: 1,
+  },
+  autocompleteLineName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  autocompleteDirection: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginTop: 2,
   },
   searchButton: {
     height: 56,

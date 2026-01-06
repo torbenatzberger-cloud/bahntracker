@@ -198,6 +198,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(data);
     }
 
+    // AUTOCOMPLETE für Live-Suche
+    if (action === 'autocomplete') {
+      const { q } = req.query;
+      if (typeof q !== 'string') {
+        return res.json({ results: [] });
+      }
+
+      const url = new URL('/trains/autocomplete', API_BASE);
+      url.searchParams.set('q', q);
+
+      const response = await fetchWithRetry(url.toString(), 2, 500); // Schnell, wenig Retries
+
+      if (!response.ok) {
+        return res.json({ results: [] }); // Bei Fehler leere Liste
+      }
+
+      const data = await response.json();
+      return res.status(200).json(data);
+    }
+
     // JOURNEYS zwischen zwei Stationen
     if (action === 'journeys') {
       const { from, to } = req.query;

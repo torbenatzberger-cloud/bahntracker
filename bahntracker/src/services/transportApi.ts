@@ -46,6 +46,33 @@ function setCachedSearch(key: string, data: TrainJourney[]): void {
   searchCache.set(key, { data, timestamp: Date.now() });
 }
 
+// Autocomplete-Ergebnis Typ
+export interface AutocompleteResult {
+  trainNumber: string;
+  lineName: string;
+  trainType: string;
+  direction: string;
+  tripId: string;
+}
+
+// Autocomplete für Live-Suche
+export async function getAutocomplete(query: string): Promise<AutocompleteResult[]> {
+  if (!query || query.length < 1) return [];
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}?action=autocomplete&q=${encodeURIComponent(query)}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    return data.results || [];
+  } catch {
+    return [];
+  }
+}
+
 // Retry-Mechanismus
 async function fetchWithRetry(url: string, retries = 3, delay = 1000): Promise<Response> {
   for (let i = 0; i < retries; i++) {
