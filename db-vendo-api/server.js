@@ -221,11 +221,17 @@ function addTrainToIndex(newIndex, trainInfo, station, source) {
 }
 
 // MAXIMALER Index aufbauen: Departures + Arrivals für 24h
+// WICHTIG: Baut in temporären Index, ersetzt erst am Ende (alte Version bleibt während Build verfügbar)
 async function buildTrainIndex() {
   console.log('=== BUILDING MAXIMUM TRAIN INDEX ===');
   console.log(`[Index] Scanning ${majorStations.length} stations`);
   console.log(`[Index] Mode: Departures + Arrivals, 24h coverage, 500 results per query`);
-  indexStatus = 'building';
+  console.log(`[Index] Old index remains available during build (${trainIndex.size} entries)`);
+
+  // Status nur auf "building" setzen wenn wir noch keinen Index haben
+  if (trainIndex.size === 0) {
+    indexStatus = 'building';
+  }
   const startTime = Date.now();
 
   const newIndex = new Map();
@@ -319,14 +325,20 @@ async function buildTrainIndex() {
     }
   }
 
-  trainIndex = newIndex;
-  indexLastUpdated = new Date();
-  indexStatus = 'ready';
-
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   const uniqueTrains = new Set([...newIndex.values()].map(t => t.trainNumber)).size;
 
-  console.log(`=== INDEX COMPLETE ===`);
+  // Nur ersetzen wenn der neue Index nicht leer ist
+  if (newIndex.size > 0) {
+    const oldSize = trainIndex.size;
+    trainIndex = newIndex;
+    indexLastUpdated = new Date();
+    indexStatus = 'ready';
+    console.log(`=== INDEX COMPLETE (replaced ${oldSize} -> ${newIndex.size} entries) ===`);
+  } else {
+    console.log(`=== INDEX BUILD FAILED (keeping old index with ${trainIndex.size} entries) ===`);
+  }
+
   console.log(`[Index] ${newIndex.size} index entries (${uniqueTrains} unique trains)`);
   console.log(`[Index] ${totalDepartures} from departures, ${totalArrivals} from arrivals`);
   console.log(`[Index] ${stationsProcessed} stations processed, ${errors} errors`);

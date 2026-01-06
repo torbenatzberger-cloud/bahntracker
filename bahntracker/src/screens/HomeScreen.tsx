@@ -207,13 +207,13 @@ export default function HomeScreen({ navigation }: any) {
                         onPress={() => handleAutocompleteSelect(result)}
                         activeOpacity={0.7}
                       >
-                        <View style={[styles.autocompleteBadge, { backgroundColor: getTrainTypeColor(result.trainType) }]}>
-                          <Text style={styles.autocompleteBadgeText}>{result.trainType}</Text>
+                        <View style={[styles.autocompleteBadge, { backgroundColor: getTrainTypeColor(result.trainType || 'RE') }]}>
+                          <Text style={styles.autocompleteBadgeText}>{result.trainType || 'Zug'}</Text>
                         </View>
                         <View style={styles.autocompleteContent}>
-                          <Text style={styles.autocompleteLineName}>{result.lineName}</Text>
+                          <Text style={styles.autocompleteLineName}>{result.lineName || result.trainNumber}</Text>
                           <Text style={styles.autocompleteDirection} numberOfLines={1}>
-                            → {result.direction}
+                            → {result.direction || 'Unbekannt'}
                           </Text>
                         </View>
                       </TouchableOpacity>
